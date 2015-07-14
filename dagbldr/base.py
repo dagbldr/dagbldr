@@ -163,8 +163,8 @@ class adam(object):
 def get_dataset_dir(dataset_name, data_dir=None, folder=None, create_dir=True):
     """ Get dataset directory path """
     if not data_dir:
-        data_dir = os.getenv("SANTA_BARBARIA_DATA", os.path.join(
-            os.path.expanduser("~"), "santa_barbaria_data"))
+        data_dir = os.getenv("DAGBLDR_DATA", os.path.join(
+            os.path.expanduser("~"), "dagbldr_data"))
     if folder is None:
         data_dir = os.path.join(data_dir, dataset_name)
     else:
@@ -320,11 +320,37 @@ def check_fetch_tfd():
 
 
 def fetch_tfd():
-    """ Returns flattened 48x48 TFD faces with pixel values in [0 - 1] """
+    """ Flattened 48x48 TFD faces with pixel values in [0 - 1]
+
+        n_samples : 102236
+        n_features : 2304
+
+        Returns
+        -------
+        summary : dict
+            A dictionary cantaining data and image statistics.
+
+            summary["data"] : array, shape (102236, 2304)
+                The flattened data for TFD
+
+            summary["mean0"] : array, shape (2304,)
+            summary["mean1"] : array, shape (102236,)
+            summary["var0"] : array, shape (2304,)
+            summary["var1"] : array, shape (102236,)
+            summary["mean"] : float
+            summary["var"] : float
+    """
     data_path = check_fetch_tfd()
     matfile = loadmat(data_path)
     all_data = matfile['images'].reshape(len(matfile['images']), -1) / 255.
-    return all_data
+    all_data = all_data.astype(theano.config.floatX)
+    return {"data": all_data,
+            "mean0": all_data.mean(axis=0),
+            "var0": all_data.var(axis=0),
+            "mean1": all_data.mean(axis=1),
+            "var1": all_data.var(axis=1),
+            "mean": all_data.mean(),
+            "var": all_data.var()}
 
 
 def check_fetch_frey():
@@ -340,11 +366,33 @@ def check_fetch_frey():
 
 
 def fetch_frey():
-    """ Returns flattened 20x28 frey faces with pixel values in [0 - 1] """
+    """ Flattened 20x28 frey faces with pixel values in [0 - 1]
+
+        Returns
+        -------
+        summary : dict
+            A dictionary cantaining data and image statistics.
+
+            summary["data"] : array, shape (1704, 560)
+            summary["mean0"] : array, shape (560,)
+            summary["mean1"] : array, shape (1704,)
+            summary["var0"] : array, shape (560,)
+            summary["var1"] : array, shape (1704,)
+            summary["mean"] : float
+            summary["var"] : float
+
+    """
     data_path = check_fetch_frey()
     matfile = loadmat(data_path)
     all_data = (matfile['ff'] / 255.).T
-    return all_data
+    all_data = all_data.astype(theano.config.floatX)
+    return {"data": all_data,
+            "mean0": all_data.mean(axis=0),
+            "var0": all_data.var(axis=0),
+            "mean1": all_data.mean(axis=1),
+            "var1": all_data.var(axis=1),
+            "mean": all_data.mean(),
+            "var": all_data.var()}
 
 
 def check_fetch_mnist():

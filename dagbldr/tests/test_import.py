@@ -1,2 +1,5 @@
+# implicit test
+from dagbldr import *
+
 def test_import_all():
-    from dagbldr import *
+    pass

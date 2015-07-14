@@ -68,28 +68,6 @@ def download(url, server_fname, local_fname=None, progress_update_percentage=5):
                 p += progress_update_percentage
 
 
-def make_character_level_from_text(text):
-    """ Create mapping and inverse mappings for text -> one_hot_char """
-    all_chars = reduce(lambda x, y: set(x) | set(y), text, set())
-    mapper = {k: n + 2 for n, k in enumerate(list(all_chars))}
-    # 1 is EOS
-    mapper["EOS"] = 1
-    # 0 is UNK/MASK - unused here but needed in general
-    mapper["UNK"] = 0
-    inverse_mapper = {v: k for k, v in mapper.items()}
-
-    def mapper_func(text_line):
-        return [mapper[c] for c in text_line] + [mapper["EOS"]]
-
-    def inverse_mapper_func(symbol_line):
-        return "".join([inverse_mapper[s] for s in symbol_line
-                        if s != mapper["EOS"]])
-
-    # Remove blank lines
-    cleaned = [mapper_func(t) for t in text if t != ""]
-    return cleaned, mapper_func, inverse_mapper_func, mapper
-
-
 def check_fetch_uci_words():
     """ Check for UCI vocabulary """
     url = 'https://archive.ics.uci.edu/ml/machine-learning-databases/'

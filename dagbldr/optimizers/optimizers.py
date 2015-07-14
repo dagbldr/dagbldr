@@ -57,7 +57,6 @@ class rmsprop(object):
         grad_norm = tensor.sqrt(sum(map(lambda x: tensor.sqr(x).sum(), grads)))
         not_finite = tensor.or_(tensor.isnan(grad_norm),
                                 tensor.isinf(grad_norm))
-        grad_norm = tensor.sqrt(grad_norm)
         scaling_num = rescale
         scaling_den = tensor.maximum(rescale, grad_norm)
         # Magic constants

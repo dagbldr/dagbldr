@@ -9,6 +9,7 @@ try:
 except ImportError:
     import pickle
 from collections import defaultdict
+from functools import reduce
 
 
 def minibatch_indices(itr, minibatch_size):
@@ -38,6 +39,56 @@ def minibatch_indices(itr, minibatch_size):
         start_indices = minibatch_indices[:-1]
         end_indices = minibatch_indices[1:]
         return zip(start_indices, end_indices)
+
+
+def make_character_level_from_text(text):
+    """ Create mapping and inverse mappings for text -> one_hot_char
+
+    Parameters
+    ----------
+    text : iterable of strings
+
+    Returns
+    -------
+    cleaned : list of list of ints, length (len(text), )
+         The original text, converted into list of list of integers
+
+    mapper_func : function
+         A function that can be used to map text into the correct form
+
+    inverse_mapper_func : function
+        A function that can be used to invert the output of mapper_func
+
+    mapper : dict
+        Dictionary containing the mapping of char -> integer
+
+    """
+
+    # Try to catch invalid input
+    try:
+        ord(text[0])
+        raise ValueError("Text should be iterable of strings")
+    except TypeError:
+        pass
+    all_chars = reduce(lambda x, y: set(x) | set(y), text, set())
+    mapper = {k: n + 2 for n, k in enumerate(list(all_chars))}
+    # 1 is EOS
+    mapper["EOS"] = 1
+    # 0 is UNK/MASK - unused here but needed in general
+    mapper["UNK"] = 0
+    inverse_mapper = {v: k for k, v in mapper.items()}
+
+    def mapper_func(text_line):
+        return [mapper[c] if c in mapper.keys() else mapper["UNK"]
+                for c in text_line] + [mapper["EOS"]]
+
+    def inverse_mapper_func(symbol_line):
+        return "".join([inverse_mapper[s] for s in symbol_line
+                        if s != mapper["EOS"]])
+
+    # Remove blank lines
+    cleaned = [mapper_func(t) for t in text if t != ""]
+    return cleaned, mapper_func, inverse_mapper_func, mapper
 
 
 def convert_to_one_hot(itr, n_classes, dtype="int32"):

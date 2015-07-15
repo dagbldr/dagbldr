@@ -4,11 +4,11 @@
 # See https://github.com/jych/cle for a library in this style
 import numpy as np
 from scipy.io import loadmat
-from functools import reduce
 import theano
 import zipfile
 import gzip
 import os
+import csv
 try:
     import cPickle as pickle
 except ImportError:
@@ -321,3 +321,68 @@ def fetch_binarized_mnist():
     test_set = (test_x, test_y)
     """
     return train_set, valid_set, test_set
+
+
+def load_iris():
+    """Load and return the iris dataset (classification).
+
+    This is basically the sklearn dataset loader, except returning a dictionary.
+
+    n_samples : 150
+    n_features : 4
+
+    Returns
+    -------
+    summary : dict
+        A dictionary cantaining data and target labels
+
+        summary["data"] : array, shape (150, 4)
+            The data for iris
+
+        summary["target"] : array, shape (150,)
+            The classification targets
+
+    """
+    module_path = os.path.dirname(__file__)
+    with open(os.path.join(module_path, 'data', 'iris.csv')) as csv_file:
+        data_file = csv.reader(csv_file)
+        temp = next(data_file)
+        n_samples = int(temp[0])
+        n_features = int(temp[1])
+        data = np.empty((n_samples, n_features))
+        target = np.empty((n_samples,), dtype=np.int)
+
+        for i, ir in enumerate(data_file):
+            data[i] = np.asarray(ir[:-1], dtype=np.float)
+            target[i] = np.asarray(ir[-1], dtype=np.int)
+
+    return {"data": data, "target": target}
+
+
+def load_digits():
+    """Load and return the digits dataset (classification).
+
+    This is basically the sklearn dataset loader, except returning a dictionary.
+
+    n_samples : 1797
+    n_features : 64
+
+    Returns
+    -------
+    summary : dict
+        A dictionary cantaining data and target labels
+
+        summary["data"] : array, shape (1797, 64)
+            The data for digits
+
+        summary["target"] : array, shape (1797,)
+            The classification targets
+
+    """
+
+    module_path = os.path.dirname(__file__)
+    data = np.loadtxt(os.path.join(module_path, 'data', 'digits.csv.gz'),
+                      delimiter=',')
+    target = data[:, -1]
+    flat_data = data[:, :-1]
+    return {"data": flat_data, "target": target.astype(np.int)}

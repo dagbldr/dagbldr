@@ -177,6 +177,25 @@ def early_stopping_status_func(valid_cost, save_path, checkpoint_dict,
         print_status_func(epoch_results)
 
 
+def default_status_func(status_number, epoch_number, epoch_results):
+    """ Default status function for iterate_function. Prints epoch info.
+
+    This is exactly equivalent to defining your own status_function as such:
+        def status_func(status_number, epoch_number, epoch_results):
+            print_status_func(epoch_results)
+
+    Parameters
+    ----------
+    status_number
+
+    epoch_number
+
+    epoch_results
+
+    """
+    print_status_func(epoch_results)
+
+
 def even_slice(arr, size):
     """ Force array to be even by slicing off the end """
     extent = -(len(arr) % size)
@@ -223,7 +242,8 @@ def iterate_function(func, list_of_minibatch_args, minibatch_size,
                      list_of_non_minibatch_args=None,
                      list_of_minibatch_functions=[make_minibatch],
                      list_of_output_names=None,
-                     n_epochs=1000, n_status=50, status_func=None,
+                     n_epochs=1000, n_status=50,
+                     status_func=default_status_func,
                      previous_epoch_results=None,
                      shuffle=False, random_state=None):
     """

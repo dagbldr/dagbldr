@@ -4,6 +4,7 @@ import numpy as np
 import numbers
 import theano
 import sys
+import warnings
 try:
     import cPickle as pickle
 except ImportError:
@@ -267,7 +268,7 @@ def iterate_function(func, list_of_minibatch_args, minibatch_size,
     shuffle and random_state are used to determine if minibatches are run
     in sequence or selected randomly each epoch.
 
-    By far the craziest function in this file.
+    By far the craziest function in this library.
 
     Example validation function:
     n_chars = 84
@@ -312,8 +313,8 @@ def iterate_function(func, list_of_minibatch_args, minibatch_size,
 
     indices = minibatch_indices(list_of_minibatch_args[0], minibatch_size)
     if len(list_of_minibatch_args[0]) % minibatch_size != 0:
-        print ("length of dataset should be evenly divisible by "
-               "minibatch_size.")
+        warnings.warn("Length of dataset should be evenly divisible by "
+                      "minibatch_size.", UserWarning)
     if len(list_of_minibatch_functions) == 1:
         list_of_minibatch_functions = list_of_minibatch_functions * len(
             list_of_minibatch_args)

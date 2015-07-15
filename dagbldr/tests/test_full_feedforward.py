@@ -52,7 +52,7 @@ def test_feedforward_theano_mix():
 
     l1_o = linear_layer([X_sym], graph, 'l1', proj_dim=20,
                         random_state=random_state)
-    #l1_o = .999 * l1_o
+    l1_o = .999 * l1_o
     y_pred = softmax_layer([l1_o], graph, 'pred', n_classes,
                            random_state=random_state)
 
@@ -67,3 +67,6 @@ def test_feedforward_theano_mix():
 
     iterate_function(train_function, [X, y], minibatch_size,
                      list_of_output_names=["cost"], n_epochs=1)
+
+if __name__ == "__main__":
+    test_feedforward_theano_mix()

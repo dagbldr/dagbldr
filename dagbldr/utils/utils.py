@@ -4,6 +4,9 @@ import numpy as np
 import theano
 from theano import tensor
 
+TAG_ID = "_dagbldr_"
+DATASETS_ID = "__datasets__"
+
 
 def as_shared(arr, name=None):
     """ Quick wrapper for theano.shared """
@@ -13,20 +16,21 @@ def as_shared(arr, name=None):
         return theano.shared(value=arr, name=name, borrow=True)
 
 
-def concatenate(tensor_list, name, axis=0, force_cast_to_float=True):
+def concatenate(tensor_list, graph, name, axis=0, force_cast_to_float=True):
     """
     Wrapper to `theano.tensor.concatenate`.
     """
     if force_cast_to_float:
         tensor_list = cast_to_float(tensor_list)
     out = tensor.concatenate(tensor_list, axis=axis)
-    conc_dim = int(sum([calc_expected_dim(inp)
-                   for inp in tensor_list]))
+    # Temporarily commenting out - remove when writing tests
+    # conc_dim = int(sum([calc_expected_dim(graph, inp)
+    #                for inp in tensor_list]))
     # This may be hosed... need to figure out how to generalize
-    shape = list(expression_shape(tensor_list[0]))
-    shape[axis] = conc_dim
-    new_shape = tuple(shape)
-    tag_expression(out, name, new_shape)
+    # shape = list(expression_shape(tensor_list[0]))
+    # shape[axis] = conc_dim
+    # new_shape = tuple(shape)
+    # tag_expression(out, name, new_shape)
     return out
 
 
@@ -102,23 +106,23 @@ def add_arrays_to_graph(list_of_arrays, list_of_names, graph, strict=True):
 def make_shapename(name, shape):
     if len(shape) == 1:
         # vector, primarily init hidden state for RNN
-        return name + "_kdl_" + str(shape[0]) + "x"
+        return name + TAG_ID + str(shape[0]) + "x"
     else:
-        return name + "_kdl_" + "x".join(map(str, list(shape)))
+        return name + TAG_ID + "x".join(map(str, list(shape)))
 
 
 def parse_shapename(shapename):
     try:
         # Bracket for scan
-        shape = shapename.split("_kdl_")[1].split("[")[0].split("x")
+        shape = shapename.split(TAG_ID)[1].split("[")[0].split("x")
     except AttributeError:
         raise AttributeError("Unable to parse shapename. Has the expression "
                              "been tagged with a shape by tag_expression? "
                              " input shapename was %s" % shapename)
-    if "[" in shapename.split("_kdl_")[1]:
+    if "[" in shapename.split(TAG_ID)[1]:
         # inside scan
         shape = shape[1:]
-    name = shapename.split("_kdl_")[0]
+    name = shapename.split(TAG_ID)[0]
     # More cleaning to handle scan
     shape = tuple([int(s) for s in shape if s != ''])
     return name, shape
@@ -154,7 +158,7 @@ def add_datasets_to_graph(list_of_datasets, list_of_names, graph, strict=True,
             sym.tag.test_value = list_of_test_values[n]
         tag_expression(sym, name, dataset.shape)
         datasets_added.append(sym)
-    graph["__datasets_added__"] = datasets_added
+    graph[DATASETS_ID] = datasets_added
     return datasets_added
 
 
@@ -170,19 +174,72 @@ def expression_shape(expression):
     return parse_shapename(expression.name)[1]
 
 
-def calc_expected_dim(expression):
+def alt_shape_of_variables(inputs, outputs, input_shapes):
+    # Thanks to P. Lamblin, F. Bastien for help to make this work
+    # mapping from initial to cloned var
+    equiv = theano.gof.graph.clone_get_equiv(inputs, outputs)
+    cloned_inputs = [equiv[inp] for inp in inputs]
+    cloned_outputs = [equiv[out] for out in outputs]
+    cloned_shapes = {equiv[k]: v for k, v in input_shapes.items()}
+    fgraph = theano.FunctionGraph(cloned_inputs, cloned_outputs, clone=False)
+    if not hasattr(fgraph, 'shape_feature'):
+        fgraph.attach_feature(tensor.opt.ShapeFeature())
+
+    kept_input = [n for n, f in enumerate(fgraph.inputs)
+                  if f in fgraph.shape_feature.shape_of.keys()]
+    input_dims = [dimension for kept_idx in kept_input
+                  for dimension in fgraph.shape_feature.shape_of[
+                      fgraph.inputs[kept_idx]]]
+
+    output_dims = [dimension for shape in fgraph.shape_feature.shape_of.values()
+                   for dimension in shape]
+
+    compute_shapes = theano.function(input_dims, output_dims,
+                                     mode="FAST_COMPILE")
+
+    numeric_input_dims = [dim for kept_idx in kept_input
+                          for dim in cloned_shapes[fgraph.inputs[kept_idx]]]
+
+    numeric_output_dims = compute_shapes(*numeric_input_dims)
+
+    sym_to_num_dict = dict(zip(output_dims, numeric_output_dims))
+
+    final_shapes = {}
+    for var in fgraph.shape_feature.shape_of:
+        final_shapes[var] = tuple(
+            sym_to_num_dict[sym] for sym in fgraph.shape_feature.shape_of[var])
+    # Super inefficient to throw all the intermediate shapes out
+    shapes = dict((outputs[n], tuple(np.array(final_shapes[co]).ravel()))
+                  for n, co in enumerate(cloned_outputs))
+    return shapes
+
+
+def calc_expected_dim(graph, expression):
     # super intertwined with add_datasets_to_graph
     # Expect variables representing datasets in graph!!!
     # Function graph madness
     # Shape format is HxWxZ
-    shape = expression_shape(expression)
-    dim = shape[-1]
+    if expression in graph[DATASETS_ID]:
+        # The expression input is a datastet - use tagged info directly
+        dim = expression_shape(expression)[-1]
+    else:
+        all_shared = [s for s in graph.values() if s != graph[DATASETS_ID]]
+        all_inputs = graph[DATASETS_ID] + all_shared
+        dataset_shapes = [expression_shape(d) for d in graph[DATASETS_ID]]
+        shared_shapes = [s.get_value().shape for s in all_shared]
+        all_input_shapes = dataset_shapes + shared_shapes
+        # Fake minibatch or time length of 2
+        fake_shapes = [(2,) + s[1:] for s in all_input_shapes]
+        all_outputs = [expression]
+        fake_dict = dict(zip(all_inputs, fake_shapes))
+        calc_shapes = alt_shape_of_variables(all_inputs, all_outputs, fake_dict)
+        dim = calc_shapes[expression][-1]
     return dim
 
 
 def fetch_from_graph(list_of_names, graph):
     """ Returns a list of shared variables from the graph """
-    if "__datasets_added__" not in graph.keys():
+    if DATASETS_ID not in graph.keys():
         # Check for dataset in graph
         raise AttributeError("No dataset in graph! Make sure to add "
                              "the dataset using add_datasets_to_graph")
@@ -193,8 +250,8 @@ def get_params_and_grads(graph, cost):
     grads = []
     params = []
     for k, p in graph.items():
-        if k[:2] == "__":
-            # skip private tags
+        if k == DATASETS_ID:
+            # skip datasets
             continue
         print("Computing grad w.r.t %s" % k)
         grad = tensor.grad(cost, p)

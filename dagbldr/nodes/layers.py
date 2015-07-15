@@ -111,7 +111,7 @@ def projection_layer(list_of_inputs, graph, name, proj_dim=None,
     if not names_in_graph(list_of_names, graph):
         assert proj_dim is not None
         assert random_state is not None
-        conc_input_dim = int(sum([calc_expected_dim(inp)
+        conc_input_dim = int(sum([calc_expected_dim(graph, inp)
                                   for inp in list_of_inputs]))
         np_W = init_func((conc_input_dim, proj_dim), random_state)
         np_b = np_zeros((proj_dim,))
@@ -122,17 +122,18 @@ def projection_layer(list_of_inputs, graph, name, proj_dim=None,
             raise AttributeError(
                 "Name %s already found in graph with strict mode!" % name)
     W, b = fetch_from_graph(list_of_names, graph)
-    conc_input = concatenate(list_of_inputs, name, axis=-1)
+    conc_input = concatenate(list_of_inputs, graph, name, axis=-1)
     output = tensor.dot(conc_input, W) + b
     if func is not None:
         final = func(output)
     else:
         final = output
-    shape = list(expression_shape(conc_input))
+    # Commenting out, remove when writing tests
+    # shape = list(expression_shape(conc_input))
     # Projection is on last axis
-    shape[-1] = proj_dim
-    new_shape = tuple(shape)
-    tag_expression(final, name, new_shape)
+    # shape[-1] = proj_dim
+    # new_shape = tuple(shape)
+    # tag_expression(final, name, new_shape)
     return final
 
 

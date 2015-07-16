@@ -88,17 +88,15 @@ def dropout(X, random_state, on_off_switch, p=0.):
     return X
 
 
-def dropout_layer(list_of_inputs, name, on_off_switch, dropout_prob=0.5,
+def dropout_layer(list_of_inputs, graph, name, on_off_switch, dropout_prob=0.5,
                   random_state=None):
     theano_seed = random_state.randint(-2147462579, 2147462579)
     # Super edge case...
     if theano_seed == 0:
         print("WARNING: prior layer got 0 seed. Reseeding...")
         theano_seed = random_state.randint(-2**32, 2**32)
-    conc_input = concatenate(list_of_inputs, name, axis=-1)
-    shape = expression_shape(conc_input)
+    conc_input = concatenate(list_of_inputs, graph, name, axis=-1)
     dropped = dropout(conc_input, random_state, on_off_switch, p=dropout_prob)
-    tag_expression(dropped, name, shape)
     return dropped
 
 
@@ -128,12 +126,6 @@ def projection_layer(list_of_inputs, graph, name, proj_dim=None,
         final = func(output)
     else:
         final = output
-    # Commenting out, remove when writing tests
-    # shape = list(expression_shape(conc_input))
-    # Projection is on last axis
-    # shape[-1] = proj_dim
-    # new_shape = tuple(shape)
-    # tag_expression(final, name, new_shape)
     return final
 
 
@@ -252,6 +244,7 @@ def gaussian_log_sample_layer(list_of_mu_inputs, list_of_log_sigma_inputs,
 
 
 def switch_wrap(switch_func, if_true_var, if_false_var, name):
+    """ DEPRECATED """
     switched = tensor.switch(switch_func, if_true_var, if_false_var)
     shape = expression_shape(if_true_var)
     assert shape == expression_shape(if_false_var)
@@ -263,6 +256,7 @@ def rnn_scan_wrap(func, sequences=None, outputs_info=None, non_sequences=None,
                   n_steps=None, truncate_gradient=-1, go_backwards=False,
                   mode=None,
                   name=None, profile=False, allow_gc=None, strict=False):
+    """ DEPRECATED """
     """ Expects 3D input sequences, dim 0 being the axis of iteration """
     # assumes 0th output of func is hidden state
     # necessary so that values out of scan can be tagged... ugh

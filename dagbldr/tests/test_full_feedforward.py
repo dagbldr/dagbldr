@@ -6,7 +6,7 @@ from dagbldr.utils import add_datasets_to_graph, convert_to_one_hot
 from dagbldr.utils import get_params_and_grads
 from dagbldr.utils import iterate_function
 from dagbldr.nodes import linear_layer, softmax_layer
-from dagbldr.nodes import categorical_crossentropy_nll
+from dagbldr.nodes import categorical_crossentropy
 from dagbldr.optimizers import sgd
 from dagbldr.datasets import load_digits
 
@@ -30,7 +30,7 @@ def test_feedforward_classifier():
     y_pred = softmax_layer([l1_o], graph, 'pred', n_classes,
                            random_state=random_state)
 
-    cost = categorical_crossentropy_nll(y_pred, y_sym).mean()
+    cost = categorical_crossentropy(y_pred, y_sym).mean()
     params, grads = get_params_and_grads(graph, cost)
     learning_rate = 0.001
     opt = sgd(params)
@@ -56,7 +56,7 @@ def test_feedforward_theano_mix():
     y_pred = softmax_layer([l1_o], graph, 'pred', n_classes,
                            random_state=random_state)
 
-    cost = categorical_crossentropy_nll(y_pred, y_sym).mean()
+    cost = categorical_crossentropy(y_pred, y_sym).mean()
     params, grads = get_params_and_grads(graph, cost)
     learning_rate = 0.001
     opt = sgd(params)

@@ -190,6 +190,9 @@ def add_datasets_to_graph(list_of_datasets, list_of_names, graph, strict=True,
         tag_expression(sym, name, dataset.shape)
         datasets_added.append(sym)
     graph[DATASETS_ID] = datasets_added
+    if len(datasets_added) == 1:
+        # Make returned value easier
+        datasets_added = datasets_added[0]
     return datasets_added
 
 

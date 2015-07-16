@@ -167,12 +167,6 @@ def fetch_tfd():
             summary["data"] : array, shape (102236, 2304)
                 The flattened data for TFD
 
-            summary["mean0"] : array, shape (2304,)
-            summary["mean1"] : array, shape (102236,)
-            summary["var0"] : array, shape (2304,)
-            summary["var1"] : array, shape (102236,)
-            summary["mean"] : float
-            summary["var"] : float
     """
     data_path = check_fetch_tfd()
     matfile = loadmat(data_path)
@@ -202,18 +196,15 @@ def check_fetch_frey():
 def fetch_frey():
     """ Flattened 20x28 frey faces with pixel values in [0 - 1]
 
+        n_samples : 1965
+        n_features : 560
+
         Returns
         -------
         summary : dict
             A dictionary cantaining data and image statistics.
 
-            summary["data"] : array, shape (1704, 560)
-            summary["mean0"] : array, shape (560,)
-            summary["mean1"] : array, shape (1704,)
-            summary["var0"] : array, shape (560,)
-            summary["var1"] : array, shape (1704,)
-            summary["mean"] : float
-            summary["var"] : float
+            summary["data"] : array, shape (1965, 560)
 
     """
     data_path = check_fetch_frey()
@@ -243,7 +234,23 @@ def check_fetch_mnist():
 
 
 def fetch_mnist():
-    """ Returns mnist digits with pixel values in [0 - 1] """
+    """ Flattened 28x28 mnist digits with pixel values in [0 - 1]
+
+        n_samples : 70000
+        n_feature : 784
+
+        Returns
+        -------
+        summary : dict
+            A dictionary cantaining data and image statistics.
+
+            summary["data"] : array, shape (70000, 784)
+            summary["targets"] : array, shape (70000,)
+            summary["train_indices"] : array, shape (50000,)
+            summary["valid_indices"] : array, shape (10000,)
+            summary["test_indices"] : array, shape (10000,)
+
+    """
     data_path = check_fetch_mnist()
     f = gzip.open(data_path, 'rb')
     try:
@@ -251,11 +258,22 @@ def fetch_mnist():
     except TypeError:
         train_set, valid_set, test_set = pickle.load(f)
     f.close()
-    return train_set, valid_set, test_set
+    train_indices = np.arange(0, len(train_set[0]))
+    valid_indices = np.arange(0, len(valid_set[0])) + train_indices[-1] + 1
+    test_indices = np.arange(0, len(test_set[0])) + valid_indices[-1] + 1
+    return {"data": np.concatenate((train_set[0], valid_set[0], test_set[0]),
+                                   axis=0).astype(theano.config.floatX),
+            "target": np.concatenate((train_set[1], valid_set[1], test_set[1]),
+                                     axis=0).astype(np.int32),
+            "train_indices": train_indices.astype(np.int32),
+            "valid_indices": valid_indices.astype(np.int32),
+            "test_indices": test_indices.astype(np.int32)}
 
 
 def check_fetch_binarized_mnist():
-    raise ValueError("Binarized MNIST has no labels!")
+    raise ValueError("Binarized MNIST has no labels! Do not use")
+    """
+    # public version
     url = 'https://github.com/mgermain/MADE/releases/download/ICML2015/'
     url += 'binarized_mnist.npz'
     partial_path = get_dataset_dir("binarized_mnist")
@@ -265,8 +283,7 @@ def check_fetch_binarized_mnist():
         os.makedirs(partial_path)
     if not os.path.exists(full_path):
         download(url, full_path, progress_update_percentage=1)
-    """
-    # Personal version
+    # personal version
     url = "https://dl.dropboxusercontent.com/u/15378192/binarized_mnist_%s.npy"
     fname = "binarized_mnist_%s.npy"
     for s in ["train", "valid", "test"]:
@@ -275,52 +292,42 @@ def check_fetch_binarized_mnist():
             os.makedirs(partial_path)
         if not os.path.exists(full_path):
             download(url % s, full_path, progress_update_percentage=1)
-    """
     return partial_path
+    """
 
 
 def fetch_binarized_mnist():
-    """ Get binarized version of MNIST data """
-    train_set, valid_set, test_set = fetch_mnist()
-    train_X = train_set[0]
-    train_y = train_set[1]
-    valid_X = valid_set[0]
-    valid_y = valid_set[1]
-    test_X = test_set[0]
-    test_y = test_set[1]
+    """ Flattened 28x28 mnist digits with pixel of either 0 or 1, sampled from
+        binomial distribution defined by the original MNIST values
 
+        n_samples : 70000
+        n_features : 784
+
+        Returns
+        -------
+        summary : dict
+            A dictionary cantaining data and image statistics.
+
+            summary["data"] : array, shape (70000, 784)
+            summary["targets"] : array, shape (70000,)
+            summary["train_indices"] : array, shape (50000,)
+            summary["valid_indices"] : array, shape (10000,)
+            summary["test_indices"] : array, shape (10000,)
+
+    """
+    mnist = fetch_mnist()
     random_state = np.random.RandomState(1999)
 
     def get_sampled(arr):
         # make sure that a pixel can always be turned off
         return random_state.binomial(1, arr * 255 / 256., size=arr.shape)
 
-    train_X = get_sampled(train_X)
-    valid_X = get_sampled(valid_X)
-    test_X = get_sampled(test_X)
-
-    train_set = (train_X, train_y)
-    valid_set = (valid_X, valid_y)
-    test_set = (test_X, test_y)
-
-    """
-    # Old version for true binarized mnist
-    data_path = check_fetch_binarized_mnist()
-    fpath = os.path.join(data_path, "binarized_mnist.npz")
-
-    arr = np.load(fpath)
-    train_x = arr['train_data']
-    valid_x = arr['valid_data']
-    test_x = arr['test_data']
-    train, valid, test = fetch_mnist()
-    train_y = train[1]
-    valid_y = valid[1]
-    test_y = test[1]
-    train_set = (train_x, train_y)
-    valid_set = (valid_x, valid_y)
-    test_set = (test_x, test_y)
-    """
-    return train_set, valid_set, test_set
+    data = get_sampled(mnist["data"]).astype(theano.config.floatX)
+    return {"data": data,
+            "target": mnist["target"],
+            "train_indices": mnist["train_indices"],
+            "valid_indices": mnist["valid_indices"],
+            "test_indices": mnist["test_indices"]}
 
 
 def load_iris():

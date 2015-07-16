@@ -1,5 +1,21 @@
-from dagbldr.utils import make_character_level_from_text
 from nose.tools import assert_raises
+
+from dagbldr.utils import make_character_level_from_text, convert_to_one_hot
+from dagbldr.datasets import load_digits
+
+digits = load_digits()
+X = digits["data"]
+y = digits["target"]
+
+
+def test_convert_to_one_hot():
+    fake_str_int = [[1, 5, 7, 1, 6, 0], [2, 3, 6, 0]]
+
+    n_classes = len(set(y))
+    convert_to_one_hot(y, n_classes)
+    convert_to_one_hot(fake_str_int, 8)
+    assert_raises(ValueError, convert_to_one_hot, X[0], n_classes)
+    assert_raises(ValueError, convert_to_one_hot, X, n_classes)
 
 
 def test_character_level_from_text():

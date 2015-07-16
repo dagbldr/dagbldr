@@ -93,17 +93,47 @@ def make_character_level_from_text(text):
 
 
 def convert_to_one_hot(itr, n_classes, dtype="int32"):
-    """ Convert 2D or 3D iterators to one_hot. Primarily for text. """
-    is_three_d = False
-    if type(itr) is np.ndarray:
-        if len(itr.shape) == 3:
-            is_three_d = True
-    elif not isinstance(itr[0], numbers.Real):
-        # Assume 3D list of list of list
-        # iterable of iterable of iterable, feature dim must be consistent
-        is_three_d = True
+    """ Convert 1D or 2D iterators of class to 2D or 3D iterators of one hot
+        class indicators.
 
-    if is_three_d:
+        Parameters
+        ----------
+        itr : iterator
+            itr can be list of list, 1D or 2D np.array. In all cases, the
+            fundamental element must have type int32 or int64.
+
+        n_classes : int
+           number of classes to expand itr to - this will become shape[-1] of
+           the returned array.
+
+        dtype : optional, default "int32"
+           dtype for the returned array.
+
+        Returns
+        -------
+        one_hot : array
+           A 2D or 3D numpy array of one_hot values. List of list or 2D
+           np.array will return a 3D numpy array, while 1D itr or list will
+           return a 2D one_hot.
+
+    """
+    is_two_d = False
+    error_msg = """itr not understood. convert_to_one_hot accepts\n
+                   list of list of int, 1D or 2D numpy arrays of\n
+                   dtype int32 or int64"""
+    if type(itr) is np.ndarray:
+        if len(itr.shape) == 2:
+            is_two_d = True
+        if itr.dtype not in [np.int32, np.int64]:
+            raise ValueError(error_msg)
+    elif not isinstance(itr[0], numbers.Real):
+        # Assume list of list
+        # iterable of iterable, feature dim must be consistent
+        is_two_d = True
+    else:
+        raise ValueError(error_msg)
+
+    if is_two_d:
         lengths = [len(i) for i in itr]
         one_hot = np.zeros((max(lengths), len(itr), n_classes), dtype=dtype)
         for n in range(len(itr)):

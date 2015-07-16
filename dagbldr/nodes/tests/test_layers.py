@@ -94,8 +94,11 @@ def test_softmax_sample_layer():
     X_sym, y_sym = add_datasets_to_graph([X, y], ["X", "y"], graph)
     softmax = softmax_layer([X_sym], graph, 'softmax', proj_dim=20,
                             random_state=random_state)
-    softmax_sample_layer([softmax], graph, 'softmax_sample',
-                         random_state=random_state)
+    samp = softmax_sample_layer([softmax], graph, 'softmax_sample',
+                                random_state=random_state)
+    out = linear_layer([samp], graph, 'out', proj_dim=10,
+                       random_state=random_state)
+    f = theano.function([X_sym], [out], mode="FAST_COMPILE")
 
 
 def test_gaussian_sample_layer():
@@ -106,8 +109,11 @@ def test_gaussian_sample_layer():
                       random_state=random_state)
     sigma = softplus_layer([X_sym], graph, 'sigma', proj_dim=20,
                            random_state=random_state)
-    gaussian_sample_layer([mu], [sigma], graph, 'gaussian_sample',
-                          random_state=random_state)
+    samp = gaussian_sample_layer([mu], [sigma], graph, 'gaussian_sample',
+                                 random_state=random_state)
+    out = linear_layer([samp], graph, 'out',proj_dim=10,
+                       random_state=random_state)
+    f = theano.function([X_sym], [out], mode="FAST_COMPILE")
 
 
 def test_gaussian_log_sample_layer():
@@ -118,5 +124,9 @@ def test_gaussian_log_sample_layer():
                       random_state=random_state)
     log_sigma = linear_layer([X_sym], graph, 'log_sigma', proj_dim=20,
                              random_state=random_state)
-    gaussian_log_sample_layer([mu], [log_sigma], graph, 'gaussian_sample',
-                              random_state=random_state)
+    samp = gaussian_log_sample_layer([mu], [log_sigma], graph,
+                                     'gaussian_sample',
+                                     random_state=random_state)
+    out = linear_layer([samp], graph, 'out', proj_dim=10,
+                       random_state=random_state)
+    f = theano.function([X_sym], [out], mode="FAST_COMPILE")

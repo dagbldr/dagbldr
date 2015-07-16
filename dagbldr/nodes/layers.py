@@ -6,8 +6,8 @@ import theano
 from theano import tensor
 from theano.sandbox.rng_mrg import MRG_RandomStreams
 from ..utils import as_shared, tag_expression, concatenate, expression_shape
-from ..utils import calc_expected_dim, names_in_graph, add_arrays_to_graph
-from ..utils import fetch_from_graph
+from ..utils import calc_expected_dims, names_in_graph, add_arrays_to_graph
+from ..utils import fetch_from_graph, add_random_to_graph
 
 
 def np_zeros(shape):
@@ -109,7 +109,7 @@ def projection_layer(list_of_inputs, graph, name, proj_dim=None,
     if not names_in_graph(list_of_names, graph):
         assert proj_dim is not None
         assert random_state is not None
-        conc_input_dim = int(sum([calc_expected_dim(graph, inp)
+        conc_input_dim = int(sum([calc_expected_dims(graph, inp)[-1]
                                   for inp in list_of_inputs]))
         np_W = init_func((conc_input_dim, proj_dim), random_state)
         np_b = np_zeros((proj_dim,))
@@ -199,6 +199,12 @@ def softmax_sample_layer(list_of_multinomial_inputs, graph, name,
     conc_multinomial /= len(list_of_multinomial_inputs)
     samp = theano_rng.multinomial(pvals=conc_multinomial,
                                   dtype="int32")
+    # We know shape of conc_multinomial == shape of random sample
+    shape = calc_expected_dims(graph, conc_multinomial)
+    list_of_random = [samp, ]
+    list_of_names = [name + "_random", ]
+    list_of_shapes = [shape, ]
+    add_random_to_graph(list_of_random, list_of_shapes, list_of_names, graph)
     return samp
 
 
@@ -215,6 +221,12 @@ def gaussian_sample_layer(list_of_mu_inputs, list_of_sigma_inputs,
     e = theano_rng.normal(size=(conc_sigma.shape[0],
                                 conc_sigma.shape[1]),
                           dtype=conc_sigma.dtype)
+    # We know shape of mu == shape of sigma == shape of random sample
+    shape = calc_expected_dims(graph, conc_mu)
+    list_of_random = [e, ]
+    list_of_names = [name + "_random", ]
+    list_of_shapes = [shape, ]
+    add_random_to_graph(list_of_random, list_of_shapes, list_of_names, graph)
     samp = conc_mu + conc_sigma * e
     return samp
 
@@ -233,6 +245,12 @@ def gaussian_log_sample_layer(list_of_mu_inputs, list_of_log_sigma_inputs,
     e = theano_rng.normal(size=(conc_log_sigma.shape[0],
                                 conc_log_sigma.shape[1]),
                           dtype=conc_log_sigma.dtype)
+    # We know shape of mu == shape of log sigma == shape of random sample
+    shape = calc_expected_dims(graph, conc_mu)
+    list_of_random = [e, ]
+    list_of_names = [name + "_random", ]
+    list_of_shapes = [shape, ]
+    add_random_to_graph(list_of_random, list_of_shapes, list_of_names, graph)
     samp = conc_mu + tensor.exp(0.5 * conc_log_sigma) * e
     return samp
 
@@ -296,9 +314,9 @@ def tanh_recurrent_layer(list_of_inputs, list_of_hiddens, graph, name,
     list_of_names = [W_name, b_name, U_name]
     if not names_in_graph(list_of_names, graph):
         assert random_state is not None
-        conc_input_dim = int(sum([calc_expected_dim(inp)
+        conc_input_dim = int(sum([calc_expected_dims(inp)[-1]
                                   for inp in list_of_inputs]))
-        conc_hidden_dim = int(sum([calc_expected_dim(hid)
+        conc_hidden_dim = int(sum([calc_expected_dims(hid)[-1]
                                    for hid in list_of_hiddens]))
         shape = (conc_input_dim, conc_hidden_dim)
         np_W = np_rand(shape, random_state)
@@ -375,9 +393,9 @@ def gru_recurrent_layer(list_of_inputs, list_of_hiddens, graph, name,
     list_of_names = [W_name, b_name, U_name]
     if not names_in_graph(list_of_names, graph):
         assert random_state is not None
-        conc_input_dim = int(sum([calc_expected_dim(inp)
+        conc_input_dim = int(sum([calc_expected_dims(inp)[-1]
                                   for inp in list_of_inputs]))
-        conc_hidden_dim = int(sum([calc_expected_dim(hid)
+        conc_hidden_dim = int(sum([calc_expected_dims(hid)[-1]
                                    for hid in list_of_hiddens]))
         shape = (conc_input_dim, conc_hidden_dim)
         np_W = np.hstack([np_rand(shape, random_state),
@@ -536,11 +554,11 @@ def lstm_recurrent_layer(list_of_inputs, list_of_hiddens, list_of_cells,
     list_of_names = [W_name, b_name, U_name]
     if not names_in_graph(list_of_names, graph):
         assert random_state is not None
-        conc_input_dim = int(sum([calc_expected_dim(inp)
+        conc_input_dim = int(sum([calc_expected_dims(inp)[-1]
                                   for inp in list_of_inputs]))
-        conc_hidden_dim = int(sum([calc_expected_dim(hid)
+        conc_hidden_dim = int(sum([calc_expected_dims(hid)[-1]
                                    for hid in list_of_hiddens]))
-        conc_cell_dim = int(sum([calc_expected_dim(hid)
+        conc_cell_dim = int(sum([calc_expected_dims(hid)[-1]
                                  for hid in list_of_cells]))
         assert conc_hidden_dim == conc_cell_dim
         shape = (conc_input_dim, conc_hidden_dim)

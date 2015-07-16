@@ -3,9 +3,24 @@
 import numpy as np
 import theano
 from theano import tensor
+from collections import OrderedDict
 
 TAG_ID = "_dagbldr_"
 DATASETS_ID = "__datasets__"
+RANDOM_ID = "__random__"
+
+
+def safe_zip(*args):
+    """Like zip, but ensures arguments are of same length.
+
+       Borrowed from pylearn2
+    """
+    base = len(args[0])
+    for i, arg in enumerate(args[1:]):
+        if len(arg) != base:
+            raise ValueError("Argument 0 has length %d but argument %d has "
+                             "length %d" % (base, i+1, len(arg)))
+    return zip(*args)
 
 
 def as_shared(arr, name=None):
@@ -73,7 +88,7 @@ def interpolate_between_points(arr, n_steps=50):
     assert len(arr) > 2
     assert n_steps > 1
     path = [path_between_points(start, stop, n_steps=n_steps)
-            for start, stop in zip(arr[:-1], arr[1:])]
+            for start, stop in safe_zip(arr[:-1], arr[1:])]
     path = np.vstack(path)
     return path
 
@@ -85,22 +100,6 @@ def path_between_points(start, stop, n_steps=100, dtype=theano.config.floatX):
     steps = np.arange(0, n_steps)[:, None] * np.ones((n_steps, len(stop)))
     steps = steps * step_vector + start
     return steps.astype(dtype)
-
-
-def names_in_graph(list_of_names, graph):
-    """ Return true if all names are in the graph """
-    return all([name in graph.keys() for name in list_of_names])
-
-
-def add_arrays_to_graph(list_of_arrays, list_of_names, graph, strict=True):
-    assert len(list_of_arrays) == len(list_of_names)
-    arrays_added = []
-    for array, name in zip(list_of_arrays, list_of_names):
-        if name in graph.keys() and strict:
-            raise ValueError("Name %s already found in graph!" % name)
-        shared_array = as_shared(array, name=name)
-        graph[name] = shared_array
-        arrays_added.append(shared_array)
 
 
 def make_shapename(name, shape):
@@ -128,11 +127,43 @@ def parse_shapename(shapename):
     return name, shape
 
 
+def names_in_graph(list_of_names, graph):
+    """ Return true if all names are in the graph """
+    return all([name in graph.keys() for name in list_of_names])
+
+
+def add_arrays_to_graph(list_of_arrays, list_of_names, graph, strict=True):
+    assert type(graph) is OrderedDict
+    arrays_added = []
+    for array, name in safe_zip(list_of_arrays, list_of_names):
+        if name in graph.keys() and strict:
+            raise ValueError("Name %s already found in graph!" % name)
+        shared_array = as_shared(array, name=name)
+        graph[name] = shared_array
+        arrays_added.append(shared_array)
+
+
+def add_random_to_graph(list_of_random, list_of_shapes, list_of_names,
+                        graph, strict=True):
+    assert type(graph) is OrderedDict
+    random_added = []
+    if RANDOM_ID not in graph.keys():
+        graph[RANDOM_ID] = []
+    for n, (random, shape, name) in enumerate(safe_zip(list_of_random,
+                                                       list_of_shapes,
+                                                       list_of_names)):
+        tag_expression(random, name, shape)
+        random_added.append(random)
+    graph[RANDOM_ID] += random_added
+    return random_added
+
+
 def add_datasets_to_graph(list_of_datasets, list_of_names, graph, strict=True,
                           list_of_test_values=None):
-    assert len(list_of_datasets) == len(list_of_names)
+    assert type(graph) is OrderedDict
     datasets_added = []
-    for n, (dataset, name) in enumerate(zip(list_of_datasets, list_of_names)):
+    for n, (dataset, name) in enumerate(safe_zip(list_of_datasets,
+                                                 list_of_names)):
         if dataset.dtype != "int32":
             if len(dataset.shape) == 1:
                 sym = tensor.vector()
@@ -214,27 +245,42 @@ def alt_shape_of_variables(inputs, outputs, input_shapes):
     return shapes
 
 
-def calc_expected_dim(graph, expression):
-    # super intertwined with add_datasets_to_graph
-    # Expect variables representing datasets in graph!!!
-    # Function graph madness
-    # Shape format is HxWxZ
+def calc_expected_dims(graph, expression):
+    # Intertwined with add_datasets_to_graph and add_random_to_graph
+    # Expect variables representing datasets, shared, and random vars in graph
+    # Named shape format is HxWxZ
     if expression in graph[DATASETS_ID]:
         # The expression input is a datastet - use tagged info directly
-        dim = expression_shape(expression)[-1]
+        dims = expression_shape(expression)
+    elif RANDOM_ID in graph.keys() and expression in graph[RANDOM_ID]:
+        # The expression input is a random variable - use tagged info directly
+        dims = expression_shape(expression)
     else:
-        all_shared = [s for s in graph.values() if s != graph[DATASETS_ID]]
-        all_inputs = graph[DATASETS_ID] + all_shared
+        # Assume anything not a random value or dataset is shared
+        # Use short-circuit AND to avoid key-error if no random values in graph
+        all_shared = [s for s in graph.values()
+                      if s != graph[DATASETS_ID] and (
+                          RANDOM_ID not in graph.keys()
+                          or s != graph[RANDOM_ID])]
+        #  == may not be good comparison in all cases
+        all_random = [r for r in graph.values()
+                      if (RANDOM_ID in graph.keys() and r == graph[RANDOM_ID])]
+        # Flatten list of lists for random
+        all_random = [ri for r in all_random for ri in r]
+        all_inputs = graph[DATASETS_ID] + all_shared + all_random
+
+        # Get shapes or fake shapes for all of the inputs
         dataset_shapes = [expression_shape(d) for d in graph[DATASETS_ID]]
         shared_shapes = [s.get_value().shape for s in all_shared]
-        all_input_shapes = dataset_shapes + shared_shapes
-        # Fake minibatch or time length of 2
+        random_shapes = [expression_shape(r) for r in all_random]
+        all_input_shapes = dataset_shapes + shared_shapes + random_shapes
+        # Fake length of 2
         fake_shapes = [(2,) + s[1:] for s in all_input_shapes]
         all_outputs = [expression]
         fake_dict = dict(zip(all_inputs, fake_shapes))
         calc_shapes = alt_shape_of_variables(all_inputs, all_outputs, fake_dict)
-        dim = calc_shapes[expression][-1]
-    return dim
+        dims = calc_shapes[expression]
+    return dims
 
 
 def fetch_from_graph(list_of_names, graph):
@@ -252,6 +298,9 @@ def get_params_and_grads(graph, cost):
     for k, p in graph.items():
         if k == DATASETS_ID:
             # skip datasets
+            continue
+        if k == RANDOM_ID:
+            # skip random
             continue
         print("Computing grad w.r.t %s" % k)
         grad = tensor.grad(cost, p)

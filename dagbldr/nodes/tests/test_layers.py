@@ -5,11 +5,13 @@ from theano import tensor
 from nose.tools import assert_raises
 from numpy.testing import assert_almost_equal
 
+from dagbldr.datasets import load_digits
 from dagbldr.utils import add_datasets_to_graph, convert_to_one_hot
 from dagbldr.nodes import projection_layer, linear_layer, softmax_layer
 from dagbldr.nodes import sigmoid_layer, tanh_layer, softplus_layer
 from dagbldr.nodes import exp_layer, relu_layer, dropout_layer
-from dagbldr.datasets import load_digits
+from dagbldr.nodes import softmax_sample_layer, gaussian_sample_layer
+from dagbldr.nodes import gaussian_log_sample_layer
 
 # Common between tests
 digits = load_digits()
@@ -84,3 +86,37 @@ def test_relu_layer():
 
 def test_softmax_layer():
     run_common_layer(softmax_layer)
+
+
+def test_softmax_sample_layer():
+    random_state = np.random.RandomState(42)
+    graph = OrderedDict()
+    X_sym, y_sym = add_datasets_to_graph([X, y], ["X", "y"], graph)
+    softmax = softmax_layer([X_sym], graph, 'softmax', proj_dim=20,
+                            random_state=random_state)
+    softmax_sample_layer([softmax], graph, 'softmax_sample',
+                         random_state=random_state)
+
+
+def test_gaussian_sample_layer():
+    random_state = np.random.RandomState(42)
+    graph = OrderedDict()
+    X_sym, y_sym = add_datasets_to_graph([X, y], ["X", "y"], graph)
+    mu = linear_layer([X_sym], graph, 'mu', proj_dim=20,
+                      random_state=random_state)
+    sigma = softplus_layer([X_sym], graph, 'sigma', proj_dim=20,
+                           random_state=random_state)
+    gaussian_sample_layer([mu], [sigma], graph, 'gaussian_sample',
+                          random_state=random_state)
+
+
+def test_gaussian_log_sample_layer():
+    random_state = np.random.RandomState(42)
+    graph = OrderedDict()
+    X_sym, y_sym = add_datasets_to_graph([X, y], ["X", "y"], graph)
+    mu = linear_layer([X_sym], graph, 'mu', proj_dim=20,
+                      random_state=random_state)
+    log_sigma = linear_layer([X_sym], graph, 'log_sigma', proj_dim=20,
+                             random_state=random_state)
+    gaussian_log_sample_layer([mu], [log_sigma], graph, 'gaussian_sample',
+                              random_state=random_state)

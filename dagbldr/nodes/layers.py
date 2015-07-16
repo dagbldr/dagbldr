@@ -186,44 +186,41 @@ def softmax_layer(list_of_inputs, graph, name, proj_dim=None, random_state=None,
         strict=strict, init_func=init_func, func=softmax)
 
 
-def softmax_sample_layer(list_of_multinomial_inputs, name, random_state=None):
+def softmax_sample_layer(list_of_multinomial_inputs, graph, name,
+                         random_state=None):
     theano_seed = random_state.randint(-2147462579, 2147462579)
     # Super edge case...
     if theano_seed == 0:
         print("WARNING: prior layer got 0 seed. Reseeding...")
         theano_seed = random_state.randint(-2**32, 2**32)
     theano_rng = MRG_RandomStreams(seed=theano_seed)
-    conc_multinomial = concatenate(list_of_multinomial_inputs, name, axis=1)
-    shape = expression_shape(conc_multinomial)
+    conc_multinomial = concatenate(list_of_multinomial_inputs, graph,
+                                   name, axis=1)
     conc_multinomial /= len(list_of_multinomial_inputs)
-    tag_expression(conc_multinomial, name, shape)
     samp = theano_rng.multinomial(pvals=conc_multinomial,
                                   dtype="int32")
-    tag_expression(samp, name, (shape[0], shape[1]))
     return samp
 
 
 def gaussian_sample_layer(list_of_mu_inputs, list_of_sigma_inputs,
-                          name, random_state=None):
+                          graph, name, random_state=None):
     theano_seed = random_state.randint(-2147462579, 2147462579)
     # Super edge case...
     if theano_seed == 0:
         print("WARNING: prior layer got 0 seed. Reseeding...")
         theano_seed = random_state.randint(-2**32, 2**32)
     theano_rng = MRG_RandomStreams(seed=theano_seed)
-    conc_mu = concatenate(list_of_mu_inputs, name, axis=1)
-    conc_sigma = concatenate(list_of_sigma_inputs, name, axis=1)
+    conc_mu = concatenate(list_of_mu_inputs, graph, name, axis=1)
+    conc_sigma = concatenate(list_of_sigma_inputs, graph, name, axis=1)
     e = theano_rng.normal(size=(conc_sigma.shape[0],
                                 conc_sigma.shape[1]),
                           dtype=conc_sigma.dtype)
     samp = conc_mu + conc_sigma * e
-    shape = expression_shape(conc_sigma)
-    tag_expression(samp, name, shape)
     return samp
 
 
 def gaussian_log_sample_layer(list_of_mu_inputs, list_of_log_sigma_inputs,
-                              name, random_state=None):
+                              graph, name, random_state=None):
     """ log_sigma_inputs should be from a linear_layer """
     theano_seed = random_state.randint(-2147462579, 2147462579)
     # Super edge case...
@@ -231,15 +228,12 @@ def gaussian_log_sample_layer(list_of_mu_inputs, list_of_log_sigma_inputs,
         print("WARNING: prior layer got 0 seed. Reseeding...")
         theano_seed = random_state.randint(-2**32, 2**32)
     theano_rng = MRG_RandomStreams(seed=theano_seed)
-    conc_mu = concatenate(list_of_mu_inputs, name, axis=1)
-    conc_log_sigma = concatenate(list_of_log_sigma_inputs, name, axis=1)
+    conc_mu = concatenate(list_of_mu_inputs, graph, name, axis=1)
+    conc_log_sigma = concatenate(list_of_log_sigma_inputs, graph, name, axis=1)
     e = theano_rng.normal(size=(conc_log_sigma.shape[0],
                                 conc_log_sigma.shape[1]),
                           dtype=conc_log_sigma.dtype)
-
     samp = conc_mu + tensor.exp(0.5 * conc_log_sigma) * e
-    shape = expression_shape(conc_log_sigma)
-    tag_expression(samp, name, shape)
     return samp
 
 

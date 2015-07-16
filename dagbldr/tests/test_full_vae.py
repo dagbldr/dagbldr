@@ -8,7 +8,7 @@ from dagbldr.utils import get_params_and_grads
 from dagbldr.utils import iterate_function
 from dagbldr.nodes import relu_layer, linear_layer, gaussian_log_sample_layer
 from dagbldr.nodes import sigmoid_layer
-from dagbldr.nodes import binary_crossentropy_nll
+from dagbldr.nodes import binary_crossentropy, gaussian_log_kl
 from dagbldr.optimizers import sgd
 
 # Common between tests
@@ -40,7 +40,8 @@ def test_vae():
     out = sigmoid_layer([l1_dec], graph, 'out', proj_dim=X.shape[1],
                         random_state=random_state)
 
-    cost = binary_crossentropy_nll(out, X_sym).mean()
+    kl = gaussian_log_kl([mu], [log_sigma], graph, 'gaussian_kl').mean()
+    cost = binary_crossentropy(out, X_sym).mean() + kl
     params, grads = get_params_and_grads(graph, cost)
     learning_rate = 0.001
     opt = sgd(params)

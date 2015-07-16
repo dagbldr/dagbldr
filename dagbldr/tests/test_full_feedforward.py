@@ -67,6 +67,3 @@ def test_feedforward_theano_mix():
 
     iterate_function(train_function, [X, y], minibatch_size,
                      list_of_output_names=["cost"], n_epochs=1)
-
-if __name__ == "__main__":
-    test_feedforward_theano_mix()

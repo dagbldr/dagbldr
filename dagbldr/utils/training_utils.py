@@ -170,9 +170,16 @@ def print_status_func(epoch_results):
     print("Epoch %i: %s" % (n_epochs_seen, last_results))
 
 
-def checkpoint_status_func(save_path, checkpoint_dict, epoch_results):
+def checkpoint_status_func(save_path, checkpoint_dict, epoch_results,
+                           nan_check=True):
     """ Saves a checkpoint dict """
     checkpoint_dict["previous_epoch_results"] = epoch_results
+    nan_test = [(k, True) for k, e_v in epoch_results.items()
+                for v in e_v if np.isnan(v)]
+    if nan_check and len(nan_test) > 0:
+        nan_keys = set([tup[0] for tup in nan_test])
+        raise ValueError("Found NaN values in the following keys ",
+                         "%s, exiting training without saving" % nan_keys)
     save_checkpoint(save_path, checkpoint_dict)
     print_status_func(epoch_results)
 

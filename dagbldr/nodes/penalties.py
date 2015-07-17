@@ -45,7 +45,7 @@ def binary_entropy(values):
     return (-values * tensor.log(values)).sum(axis=-1)
 
 
-def categorical_crossentropy(predicted_values, true_values):
+def categorical_crossentropy(predicted_values, true_values, eps=1E-6):
     """ Multinoulli negative log likelihood of predicted compared to one hot
         true_values
 
@@ -60,6 +60,9 @@ def categorical_crossentropy(predicted_values, true_values):
             predicted_values. One hot representations can be achieved using
             dagbldr.utils.convert_to_one_hot
 
+        eps : float, default 1E-6
+            Epsilon to be added during log calculation to avoid NaN values.
+
         Returns
         -------
         categorical_crossentropy : tensor, shape predicted_values.shape[1:]
@@ -69,14 +72,14 @@ def categorical_crossentropy(predicted_values, true_values):
     indices = tensor.argmax(true_values, axis=-1)
     rows = tensor.arange(true_values.shape[0])
     if predicted_values.ndim < 3:
-        return -tensor.log(predicted_values)[rows, indices]
+        return -tensor.log(predicted_values + eps)[rows, indices]
     elif predicted_values.ndim == 3:
         d0 = true_values.shape[0]
         d1 = true_values.shape[1]
         pred = predicted_values.reshape((d0 * d1, -1))
         ind = indices.reshape((d0 * d1,))
         s = tensor.arange(pred.shape[0])
-        correct = -tensor.log(pred)[s, ind]
+        correct = -tensor.log(pred + eps)[s, ind]
         return correct.reshape((d0, d1,))
     else:
         raise AttributeError("Tensor dim not supported")
@@ -89,13 +92,11 @@ def abs_error(predicted_values, true_values):
         Parameters
         ----------
         predicted_values : tensor, shape 2D or 3D
-            The predicted class probabilities out of some layer,
-            normally the output of softmax_layer
+            The predicted values out of some layer.
 
         true_values : tensor, shape 2D or 3D
-            One hot ground truth values. Must be the same shape as
-            predicted_values. One hot representations can be achieved using
-            dagbldr.utils.convert_to_one_hot
+            Ground truth values. Must be the same shape as
+            predicted_values.
 
         Returns
         -------
@@ -224,7 +225,7 @@ def gaussian_kl(list_of_mu_inputs, list_of_sigma_inputs, graph, name):
     conc_mu = concatenate(list_of_mu_inputs, graph, name)
     conc_sigma = concatenate(list_of_sigma_inputs, graph, name)
     kl = 0.5 * tensor.sum(-2 * tensor.log(conc_sigma) + conc_mu ** 2
-                          + conc_sigma ** 2 - 1, axis=-1)
+                          + conc_sigma ** 2 - 1, axis=1)
     return kl
 
 
@@ -251,5 +252,5 @@ def gaussian_log_kl(list_of_mu_inputs, list_of_log_sigma_inputs, graph, name):
     conc_mu = concatenate(list_of_mu_inputs, graph, name)
     conc_log_sigma = 0.5 * concatenate(list_of_log_sigma_inputs, graph, name)
     kl = 0.5 * tensor.sum(-2 * conc_log_sigma + conc_mu ** 2
-                          + tensor.exp(conc_log_sigma) ** 2 - 1, axis=-1)
+                          + tensor.exp(2 * conc_log_sigma) - 1, axis=1)
     return kl

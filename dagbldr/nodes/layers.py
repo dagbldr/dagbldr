@@ -120,7 +120,8 @@ def projection_layer(list_of_inputs, graph, name, proj_dim=None,
             raise AttributeError(
                 "Name %s already found in graph with strict mode!" % name)
     W, b = fetch_from_graph(list_of_names, graph)
-    conc_input = concatenate(list_of_inputs, graph, name, axis=-1)
+    conc_input = concatenate(list_of_inputs, graph, name,
+                             axis=list_of_inputs[0].ndim - 1)
     output = tensor.dot(conc_input, W) + b
     if func is not None:
         final = func(output)
@@ -304,19 +305,20 @@ def rnn_scan_wrap(func, sequences=None, outputs_info=None, non_sequences=None,
     return outputs, updates
 
 
-def tanh_recurrent_layer(list_of_inputs, list_of_hiddens, graph, name,
-                         random_state=None, strict=True):
+def tanh_recurrent_step_layer(list_of_inputs, list_of_hiddens, graph, name,
+                              random_state=None, strict=True):
+    """ DEPRECATED """
     # All inputs are assumed 2D as are hiddens
     # Everything is dictated by the size of the hiddens
-    W_name = name + '_tanhrec_W'
-    b_name = name + '_tanhrec_b'
-    U_name = name + '_tanhrec_U'
+    W_name = name + '_tanh_rec_step_W'
+    b_name = name + '_tanh_rec_step_b'
+    U_name = name + '_tanh_rec_step_U'
     list_of_names = [W_name, b_name, U_name]
     if not names_in_graph(list_of_names, graph):
         assert random_state is not None
-        conc_input_dim = int(sum([calc_expected_dims(inp)[-1]
+        conc_input_dim = int(sum([calc_expected_dims(graph, inp)[-1]
                                   for inp in list_of_inputs]))
-        conc_hidden_dim = int(sum([calc_expected_dims(hid)[-1]
+        conc_hidden_dim = int(sum([calc_expected_dims(graph, hid)[-1]
                                    for hid in list_of_hiddens]))
         shape = (conc_input_dim, conc_hidden_dim)
         np_W = np_rand(shape, random_state)
@@ -331,62 +333,65 @@ def tanh_recurrent_layer(list_of_inputs, list_of_hiddens, graph, name,
 
     W, b, U = fetch_from_graph(list_of_names, graph)
     # per timestep
-    conc_input = concatenate(list_of_inputs, name + "_input", axis=-1)
-    conc_hidden = concatenate(list_of_hiddens, name + "_hidden", axis=-1)
+    conc_input = concatenate(list_of_inputs, graph, name + "_input", axis=-1)
+    conc_hidden = concatenate(list_of_hiddens, graph, name + "_hidden", axis=-1)
     output = tensor.tanh(tensor.dot(conc_input, W) + b +
                          tensor.dot(conc_hidden, U))
-    # remember this is number of dims per timestep!
-    shape = expression_shape(conc_input)
-    tag_expression(output, name, shape)
     return output
 
 
-def easy_tanh_recurrent(list_of_inputs, mask, hidden_dim, graph, name,
-                        random_state,
-                        one_step=False):
-    # an easy interface to lstm recurrent nets
-    shape = expression_shape(list_of_inputs[0])
-    # If the expressions are not the same length and batch size it won't work
-    max_ndim = max([inp.ndim for inp in list_of_inputs])
-    if max_ndim > 3:
-        raise ValueError("Input with ndim > 3 detected!")
-    elif max_ndim == 2:
-        # Simulate batch size 1
-        shape = (shape[0], 1, shape[1])
+def tanh_recurrent_layer(list_of_inputs, mask, hidden_dim, graph, name,
+                         random_state, strict=True):
+    ndim = [len(calc_expected_dims(graph, inp)) for inp in list_of_inputs]
+    check = [n for n in ndim if n != 3]
+    if len(check) > 0:
+        raise ValueError("Input with ndim != 3 detected!")
 
-    # an easy interface to tanh recurrent nets
+    # shape[0] is fake, but shape[1] and shape[2] are fine
+    conc_input = concatenate(list_of_inputs, graph, name + "_input", axis=-1)
+    shape = calc_expected_dims(graph, conc_input)
     h0 = np_zeros((shape[1], hidden_dim))
-    h0_sym = as_shared(h0, name)
-    tag_expression(h0_sym, name, (shape[1], hidden_dim))
+    list_of_names = [name + '_h0']
+    add_arrays_to_graph([h0], list_of_names, graph)
+    h0_sym, = fetch_from_graph(list_of_names, graph)
 
-    def step(x_t, m_t, h_tm1):
-        h_ti = tanh_recurrent_layer([x_t], [h_tm1], graph,
-                                    name + '_easy_tanh_rec', random_state)
+    W_name = name + '_tanh_rec_step_W'
+    b_name = name + '_tanh_rec_step_b'
+    U_name = name + '_tanh_rec_step_U'
+    list_of_names = [W_name, b_name, U_name]
+    if not names_in_graph(list_of_names, graph):
+        assert random_state is not None
+        conc_input_dim = int(sum([calc_expected_dims(graph, inp)[-1]
+                                  for inp in list_of_inputs]))
+        shape = (conc_input_dim, hidden_dim)
+        np_W = np_rand(shape, random_state)
+        np_b = np_zeros((shape[-1],))
+        np_U = np_ortho((shape[-1], shape[-1]), random_state)
+        add_arrays_to_graph([np_W, np_b, np_U], list_of_names, graph,
+                            strict=strict)
+    else:
+        if strict:
+            raise AttributeError(
+                "Name %s already found in graph with strict mode!" % name)
+
+    W, b, U = fetch_from_graph(list_of_names, graph)
+    projected_input = tensor.dot(conc_input, W) + b
+
+    def step(x_t, m_t, h_tm1, U):
+        h_ti = tensor.tanh(x_t + tensor.dot(h_tm1, U))
         h_t = m_t[:, None] * h_ti + (1 - m_t)[:, None] * h_tm1
         return h_t
 
-    if one_step:
-        conc_input = concatenate(list_of_inputs, name + "_easy_tanh_step",
-                                 axis=-1)
-        shape = expression_shape(conc_input)
-        sliced = conc_input[0]
-        tag_expression(sliced, name, shape[1:])
-        shape = expression_shape(mask)
-        mask_sliced = mask[0]
-        tag_expression(mask_sliced, name + "_mask", shape[1:])
-        h = step(sliced, h0_sym, mask_sliced)
-        shape = expression_shape(sliced)
-        tag_expression(h, name, shape)
-    else:
-        # the hidden state `h` for the entire sequence
-        h, updates = rnn_scan_wrap(step, name=name + '_easy_tanh_scan',
-                                   sequences=list_of_inputs + [mask],
-                                   outputs_info=[h0_sym])
+    h, updates = theano.scan(step, name=name + '_tanh_recurrent_scan',
+                             sequences=[projected_input, mask],
+                             outputs_info=[h0_sym],
+                             non_sequences=[U])
     return h
 
 
 def gru_recurrent_layer(list_of_inputs, list_of_hiddens, graph, name,
                         random_state=None, strict=True):
+    """ DEPRECATED """
     W_name = name + '_grurec_W'
     b_name = name + '_grurec_b'
     U_name = name + '_grurec_U'
@@ -548,6 +553,7 @@ def easy_gru_cond_recurrent(list_of_inputs, list_of_hiddens, mask, hidden_dim,
 
 def lstm_recurrent_layer(list_of_inputs, list_of_hiddens, list_of_cells,
                          graph, name, random_state=None, strict=True):
+    """ DEPRECATED """
     W_name = name + '_lstmrec_W'
     b_name = name + '_lstmrec_b'
     U_name = name + '_lstmrec_U'

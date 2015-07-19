@@ -3,6 +3,8 @@
 import numpy as np
 import theano
 from theano import tensor
+from theano.scan_module.scan_utils import infer_shape
+from theano.gof.fg import MissingInputError
 from collections import OrderedDict
 
 TAG_ID = "_dagbldr_"
@@ -191,7 +193,7 @@ def add_datasets_to_graph(list_of_datasets, list_of_names, graph, strict=True,
         datasets_added.append(sym)
     graph[DATASETS_ID] = datasets_added
     if len(datasets_added) == 1:
-        # Make returned value easier
+        # Make returned value easier to access
         datasets_added = datasets_added[0]
     return datasets_added
 
@@ -221,28 +223,58 @@ def alt_shape_of_variables(inputs, outputs, input_shapes):
 
     kept_input = [n for n, f in enumerate(fgraph.inputs)
                   if f in fgraph.shape_feature.shape_of.keys()]
+
     input_dims = [dimension for kept_idx in kept_input
                   for dimension in fgraph.shape_feature.shape_of[
                       fgraph.inputs[kept_idx]]]
+    """
+    # The old way
+    output_dims = [dimension for f, shape in
+                   fgraph.shape_feature.shape_of.items()
+                   for dimension in shape
+                   if f in fgraph.outputs]
+    """
 
-    output_dims = [dimension for shape in fgraph.shape_feature.shape_of.values()
-                   for dimension in shape]
+    output_dims = list(*infer_shape(cloned_outputs, cloned_inputs,
+                                    [input_shapes[k] for k in inputs]))
 
-    compute_shapes = theano.function(input_dims, output_dims,
-                                     mode="FAST_COMPILE")
+    try:
+        compute_shapes = theano.function(input_dims,
+                                         output_dims,
+                                         mode="FAST_COMPILE",
+                                         on_unused_input="ignore")
 
-    numeric_input_dims = [dim for kept_idx in kept_input
-                          for dim in cloned_shapes[fgraph.inputs[kept_idx]]]
+        numeric_input_dims = [dim for kept_idx in kept_input
+                              for dim in cloned_shapes[fgraph.inputs[kept_idx]]]
 
-    numeric_output_dims = compute_shapes(*numeric_input_dims)
+        numeric_output_dims = compute_shapes(*numeric_input_dims)
+    except MissingInputError:
+        # need to add fake datasets and masks to input args for ?? reasons
+        # unfortunate things might start happening if intermediate vars named
+        # example that activated this code path
+        # data -> linear -> tanh_rnn_layer
+        dataset_and_mask_indices = [n for n, f in enumerate(fgraph.inputs)
+                                    if f.name is not None]
+        compute_shapes = theano.function(
+            [fgraph.inputs[i] for i in dataset_and_mask_indices] + input_dims,
+            output_dims, mode="FAST_COMPILE",
+            on_unused_input="ignore")
 
-    sym_to_num_dict = dict(zip(output_dims, numeric_output_dims))
+        numeric_input_dims = [dim for kept_idx in kept_input
+                              for dim in cloned_shapes[fgraph.inputs[kept_idx]]]
+        fake_numeric_data = [np.ones(
+            cloned_shapes[fgraph.inputs[i]]).astype(fgraph.inputs[i].dtype)
+            for i in dataset_and_mask_indices]
+
+        numeric_inputs = fake_numeric_data + numeric_input_dims
+
+        numeric_output_dims = compute_shapes(*numeric_inputs)
 
     final_shapes = {}
-    for var in fgraph.shape_feature.shape_of:
-        final_shapes[var] = tuple(
-            sym_to_num_dict[sym] for sym in fgraph.shape_feature.shape_of[var])
-    # Super inefficient to throw all the intermediate shapes out
+    # This assumes only 1 OUTPUT!!!
+    for var in fgraph.outputs:
+        final_shapes[var] = np.array(numeric_output_dims).ravel()
+
     shapes = dict((outputs[n], tuple(np.array(final_shapes[co]).ravel()))
                   for n, co in enumerate(cloned_outputs))
     return shapes
@@ -271,7 +303,6 @@ def calc_expected_dims(graph, expression):
         # Flatten list of lists for random
         all_random = [ri for r in all_random for ri in r]
         all_inputs = graph[DATASETS_ID] + all_shared + all_random
-
         # Get shapes or fake shapes for all of the inputs
         dataset_shapes = [expression_shape(d) for d in graph[DATASETS_ID]]
         shared_shapes = [s.get_value().shape for s in all_shared]

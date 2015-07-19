@@ -4,6 +4,7 @@
 # See https://github.com/jych/cle for a library in this style
 import numpy as np
 from scipy.io import loadmat
+from scipy.linalg import svd
 import theano
 import zipfile
 import gzip
@@ -172,13 +173,28 @@ def fetch_tfd():
     matfile = loadmat(data_path)
     all_data = matfile['images'].reshape(len(matfile['images']), -1) / 255.
     all_data = all_data.astype(theano.config.floatX)
+    train_indices = np.arange(0, 90000)
+    valid_indices = np.arange(0, 10000) + len(train_indices) + 1
+    test_indices = np.arange(valid_indices[-1] + 1, len(all_data))
+    train_data = all_data[train_indices]
+    train_mean0 = train_data.mean(axis=0)
+    random_state = np.random.RandomState(1999)
+    subset_indices = random_state.choice(train_indices, 25000, replace=False)
+    saved_pca_path = os.path.join(get_dataset_dir("tfd"), "TFD_PCA.npy")
+    if not os.path.exists(saved_pca_path):
+        print("Saved PCA not found for TFD, computing...")
+        U, S, V = svd(train_data[subset_indices] - train_mean0,
+                      full_matrices=False)
+        train_pca = V
+        np.save(saved_pca_path, train_pca)
+    else:
+        train_pca = np.load(saved_pca_path)
     return {"data": all_data,
-            "mean0": all_data.mean(axis=0),
-            "var0": all_data.var(axis=0),
-            "mean1": all_data.mean(axis=1),
-            "var1": all_data.var(axis=1),
-            "mean": all_data.mean(),
-            "var": all_data.var()}
+            "train_indices": train_indices,
+            "valid_indices": valid_indices,
+            "test_indices": test_indices,
+            "train_mean0": train_mean0,
+            "train_pca_matrix": train_pca}
 
 
 def check_fetch_frey():
@@ -330,6 +346,42 @@ def fetch_binarized_mnist():
             "test_indices": mnist["test_indices"]}
 
 
+def make_sincos(n_timesteps, n_pairs):
+    """Generate a 2D array of sine and cosine pairs at random frequencies and
+    linear phase offsets depending on position in minibatch.
+
+    Used for simple testing of RNN algorithms.
+
+    Parameters
+    ----------
+    n_timesteps : int
+        number of timesteps
+
+    n_pairs : int
+        number of sine, cosine pairs to generate
+
+    Returns
+    -------
+    pairs : array, shape (n_timesteps, n_pairs, 2)
+        A minibatch of sine, cosine pairs with the RNN minibatch converntion
+        (timestep, sample, feature).
+    """
+    n_timesteps = int(n_timesteps)
+    n_pairs = int(n_pairs)
+    random_state = np.random.RandomState(1999)
+    frequencies = 5 * random_state.rand(n_pairs) + 1
+    frequency_base = np.arange(n_timesteps) / (2 * np.pi)
+    steps = frequency_base[:, None] * frequencies[None]
+    phase_offset = np.arange(n_pairs) / (2 * np.pi)
+    sines = np.sin(steps + phase_offset)
+    cosines = np.sin(steps + phase_offset + np.pi / 2)
+    sines = sines[:, :, None]
+    cosines = cosines[:, :, None]
+    pairs = np.concatenate((sines, cosines), axis=-1).astype(
+        theano.config.floatX)
+    return pairs
+
+
 def load_iris():
     """Load and return the iris dataset (classification).
 
@@ -356,12 +408,12 @@ def load_iris():
         temp = next(data_file)
         n_samples = int(temp[0])
         n_features = int(temp[1])
-        data = np.empty((n_samples, n_features))
-        target = np.empty((n_samples,), dtype=np.int)
+        data = np.empty((n_samples, n_features), dtype=theano.config.floatX)
+        target = np.empty((n_samples,), dtype=np.int32)
 
         for i, ir in enumerate(data_file):
-            data[i] = np.asarray(ir[:-1], dtype=np.float)
-            target[i] = np.asarray(ir[-1], dtype=np.int)
+            data[i] = np.asarray(ir[:-1], dtype=theano.config.floatX)
+            target[i] = np.asarray(ir[-1], dtype=np.int32)
 
     return {"data": data, "target": target}
 
@@ -390,6 +442,6 @@ def load_digits():
     module_path = os.path.dirname(__file__)
     data = np.loadtxt(os.path.join(module_path, 'data', 'digits.csv.gz'),
                       delimiter=',')
-    target = data[:, -1]
-    flat_data = data[:, :-1]
-    return {"data": flat_data, "target": target.astype(np.int)}
+    target = data[:, -1].astype("int32")
+    flat_data = data[:, :-1].astype(theano.config.floatX)
+    return {"data": flat_data, "target": target}

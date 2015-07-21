@@ -6,6 +6,7 @@ import glob
 import subprocess
 from itertools import cycle
 
+
 def plot_training_epochs(epochs_dict, plot_name, plot_limit=None, turn_on_agg=True):
     # plot_limit can be a positive integer, negative integer, or float between 0 and 1
     # foat between 0 and 1 assumed to be percentage of total to keep
@@ -25,8 +26,30 @@ def plot_training_epochs(epochs_dict, plot_name, plot_limit=None, turn_on_agg=Tr
         plt.close()
 
 
+def plot_images_as_subplots(list_of_plot_args, plot_name, width, height,
+                            invert_y=False, invert_x=False, turn_on_agg=True):
+    if turn_on_agg:
+        import matplotlib
+        matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    lengths = [len(a) for a in list_of_plot_args]
+    if len(list(filter(lambda x: x != lengths[0], lengths))) > 0:
+        raise ValueError("list_of_plot_args has elements of different lengths!")
+
+    f, axarr = plt.subplots(lengths[0], len(lengths))
+    for n, v in enumerate(list_of_plot_args):
+        for i, X_i in enumerate(v):
+            axarr[i, n].matshow(X_i.reshape(width, height), cmap="gray")
+            axarr[i, n].axis('off')
+            if invert_y:
+                axarr[i, n].set_ylim(axarr[i, n].get_ylim()[::-1])
+            if invert_x:
+                axarr[i, n].set_xlim(axarr[i, n].get_xlim()[::-1])
+    plt.savefig(plot_name + ".png")
+
+
 def make_gif(arr, gif_name, plot_width, plot_height, resize_scale_width=5, resize_scale_height=5,
-             list_text_per_frame=None, invert_axes=False,
+             list_text_per_frame=None, invert_y=False, invert_x=False,
              list_text_per_frame_color=None,
              delay=1, grayscale=False,
              loop=False, turn_on_agg=True):
@@ -40,11 +63,13 @@ def make_gif(arr, gif_name, plot_width, plot_height, resize_scale_width=5, resiz
     random_code = random.randrange(2 ** 32)
     pre = str(random_code)
     for n, arr_i in enumerate(arr):
-        if invert_axes:
-           plot_origin = "lower"
-        else:
-           plot_origin = "upper"
-        plt.matshow(arr_i.reshape(plot_width, plot_height), cmap="gray", origin=plot_origin)
+        plt.matshow(arr_i.reshape(plot_width, plot_height), cmap="gray")
+        if invert_y:
+            ax = plt.gca()
+            ax.set_ylim(ax.get_ylim()[::-1])
+        if invert_x:
+            ax = plt.gca()
+            ax.set_xlim(ax.get_xlim()[::-1])
 
         plt.axis('off')
         if list_text_per_frame is not None:

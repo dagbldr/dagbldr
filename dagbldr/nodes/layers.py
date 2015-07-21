@@ -389,54 +389,71 @@ def tanh_recurrent_layer(list_of_inputs, mask, hidden_dim, graph, name,
     return h
 
 
-def gru_recurrent_layer(list_of_inputs, list_of_hiddens, graph, name,
-                        random_state=None, strict=True):
-    """ DEPRECATED """
-    W_name = name + '_grurec_W'
-    b_name = name + '_grurec_b'
-    U_name = name + '_grurec_U'
-    list_of_names = [W_name, b_name, U_name]
+def gru_recurrent_layer(list_of_inputs, mask, hidden_dim, graph, name,
+                        random_state, strict=True):
+    ndim = [len(calc_expected_dims(graph, inp)) for inp in list_of_inputs]
+    check = [n for n in ndim if n != 3]
+    if len(check) > 0:
+        raise ValueError("Input with ndim != 3 detected!")
+
+    # shape[0] is fake, but shape[1] and shape[2] are fine
+    conc_input = concatenate(list_of_inputs, graph, name + "_input", axis=-1)
+    shape = calc_expected_dims(graph, conc_input)
+    h0 = np_zeros((shape[1], hidden_dim))
+    list_of_names = [name + '_h0']
+    add_arrays_to_graph([h0], list_of_names, graph)
+    h0_sym, = fetch_from_graph(list_of_names, graph)
+
+    W_name = name + '_gru_rec_step_W'
+    b_name = name + '_gru_rec_step_b'
+    Urz_name = name + '_gru_rec_step_Urz'
+    U_name = name + '_gru_rec_step_U'
+    list_of_names = [W_name, b_name, Urz_name, U_name]
     if not names_in_graph(list_of_names, graph):
         assert random_state is not None
-        conc_input_dim = int(sum([calc_expected_dims(inp)[-1]
+        conc_input_dim = int(sum([calc_expected_dims(graph, inp)[-1]
                                   for inp in list_of_inputs]))
-        conc_hidden_dim = int(sum([calc_expected_dims(hid)[-1]
-                                   for hid in list_of_hiddens]))
-        shape = (conc_input_dim, conc_hidden_dim)
+        shape = (conc_input_dim, hidden_dim)
         np_W = np.hstack([np_rand(shape, random_state),
                           np_rand(shape, random_state),
                           np_rand(shape, random_state)])
         np_b = np_zeros((3 * shape[1],))
-        np_U = np.hstack([np_ortho((shape[1], shape[1]), random_state),
-                          np_ortho((shape[1], shape[1]), random_state),
-                          np_ortho((shape[1], shape[1]), random_state)])
-        add_arrays_to_graph([np_W, np_b, np_U], list_of_names, graph,
+        np_Urz = np.hstack([np_ortho((shape[1], shape[1]), random_state),
+                            np_ortho((shape[1], shape[1]), random_state), ])
+        np_U = np.hstack([np_ortho((shape[1], shape[1]), random_state), ])
+        add_arrays_to_graph([np_W, np_b, np_Urz, np_U], list_of_names, graph,
                             strict=strict)
     else:
         if strict:
             raise AttributeError(
                 "Name %s already found in graph with strict mode!" % name)
 
+    W, b, Urz, U = fetch_from_graph(list_of_names, graph)
+    projected_input = tensor.dot(conc_input, W) + b
+
     def _slice(arr, n):
         # First slice is tensor_dim - 1 sometimes with scan...
+        # need to be *very* careful and test with strict=False and reusing stuff
+        # since shape is redefined in if not names_in_graph...
         dim = shape[1]
         if arr.ndim < 2:
             return arr[n * dim:(n + 1) * dim]
         return arr[:, n * dim:(n + 1) * dim]
-    W, b, U = fetch_from_graph(list_of_names, graph)
-    conc_input = concatenate(list_of_inputs, name + "_input", axis=0)
-    conc_hidden = concatenate(list_of_hiddens, name + "_hidden", axis=0)
-    proj_i = tensor.dot(conc_input, W) + b
-    proj_h = tensor.dot(conc_hidden, U)
-    r = tensor.nnet.sigmoid(_slice(proj_i, 1)
-                            + _slice(proj_h, 1))
-    z = tensor.nnet.sigmoid(_slice(proj_i, 2)
-                            + _slice(proj_h, 2))
-    candidate_h = tensor.tanh(_slice(proj_i, 0) + r * _slice(proj_h, 0))
-    output = z * conc_hidden + (1. - z) * candidate_h
-    # remember this is number of dims per timestep!
-    tag_expression(output, name, (shape[1],))
-    return output
+
+    def step(x_t, m_t, h_tm1, U):
+        projected_gates = tensor.dot(h_tm1, Urz)
+        r = tensor.nnet.sigmoid(_slice(x_t, 0) + _slice(projected_gates, 0))
+        z = tensor.nnet.sigmoid(_slice(x_t, 1) + _slice(projected_gates, 1))
+        candidate_h_t = tensor.tanh(_slice(x_t, 2) + tensor.dot(r * h_tm1, U))
+        h_ti = z * h_tm1 + (1. - z) * candidate_h_t
+        h_t = m_t[:, None] * h_ti + (1 - m_t)[:, None] * h_tm1
+        return h_t
+
+    h, updates = theano.scan(step, name=name + '_gru_recurrent_scan',
+                             sequences=[projected_input, mask],
+                             outputs_info=[h0_sym],
+                             non_sequences=[U])
+    return h
 
 
 def easy_gru_recurrent(list_of_inputs, mask, hidden_dim, graph, name,

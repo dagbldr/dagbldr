@@ -5,6 +5,8 @@ import numbers
 import theano
 import sys
 import warnings
+import time
+import pprint
 try:
     import cPickle as pickle
 except ImportError:
@@ -167,7 +169,13 @@ def print_status_func(epoch_results):
     """ Print the last results from a results dictionary """
     n_epochs_seen = max([len(l) for l in epoch_results.values()])
     last_results = {k: v[-1] for k, v in epoch_results.items()}
-    print("Epoch %i: %s" % (n_epochs_seen, last_results))
+    pp = pprint.PrettyPrinter()
+    epochline = "Epoch %i" % n_epochs_seen
+    breakline = "".join(["-"] * (len(epochline) + 1))
+    print(breakline)
+    print(epochline)
+    print(breakline)
+    pp.pprint(last_results)
 
 
 def checkpoint_status_func(save_path, checkpoint_dict, epoch_results,
@@ -290,7 +298,7 @@ def iterate_function(func, list_of_minibatch_args, minibatch_size,
     Constant arguments which should not be iterated can be passed as
     list_of_non_minibatch_args.
 
-    If list_of_minbatch_functions is length 1, will be replicated to length of
+    If list_of_minibatch_functions is length 1, will be replicated to length of
     list_of_args - applying the same function to all minibatch arguments in
     list_of_args. Otherwise, this should be the same length as list_of_args
 
@@ -358,11 +366,14 @@ def iterate_function(func, list_of_minibatch_args, minibatch_size,
     else:
         assert len(list_of_minibatch_functions) == len(list_of_minibatch_args)
     # Function loop
+    global_start = time.time()
     for e in range(n_epochs):
+        epoch_start = time.time()
         results = defaultdict(list)
         if shuffle:
             random_state.shuffle(indices)
-        for i, j in indices:
+        for minibatch_count, (i, j) in enumerate(indices):
+            minibatch_start = time.time()
             minibatch_args = []
             for n, arg in enumerate(list_of_minibatch_args):
                 minibatch_args += list_of_minibatch_functions[n](arg, i, j)
@@ -380,9 +391,17 @@ def iterate_function(func, list_of_minibatch_args, minibatch_size,
                         minibatch_results[n])
                 else:
                     results[n].append(minibatch_results[n])
-        avg_output = {r: np.mean(results[r]) for r in results.keys()}
-        for k in avg_output.keys():
-            epoch_results[k].append(avg_output[k])
+        epoch_stop = time.time()
+        output = {r: np.mean(results[r]) for r in results.keys()}
+        output["mean_minibatch_time_s"] = (epoch_stop - epoch_start) / float(minibatch_count + 1)
+        output["mean_sample_time_s"] = (epoch_stop - epoch_start) / float(
+            len(list_of_minibatch_args[0] * (minibatch_count + 1)))
+        output["this_epoch_time_s"] = epoch_stop - epoch_start
+        output["mean_epoch_time_s"] = (epoch_stop - global_start) / float(e + 1)
+        output["total_training_time_s"] = epoch_stop - global_start
+        output["total_number_of_updates"] = (e + 1) * (minibatch_count + 1)
+        for k in output.keys():
+            epoch_results[k].append(output[k])
         if e in status_points:
             if status_func is not None:
                 epoch_number = e

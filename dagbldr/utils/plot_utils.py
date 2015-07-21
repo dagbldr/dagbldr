@@ -39,7 +39,7 @@ def plot_images_as_subplots(list_of_plot_args, plot_name, width, height,
     f, axarr = plt.subplots(lengths[0], len(lengths))
     for n, v in enumerate(list_of_plot_args):
         for i, X_i in enumerate(v):
-            axarr[i, n].matshow(X_i.reshape(width, height), cmap="gray")
+            axarr[i, n].matshow(X_i.reshape(width, height), cmap="gray", interpolation="none")
             axarr[i, n].axis('off')
             if invert_y:
                 axarr[i, n].set_ylim(axarr[i, n].get_ylim()[::-1])
@@ -63,7 +63,7 @@ def make_gif(arr, gif_name, plot_width, plot_height, resize_scale_width=5, resiz
     random_code = random.randrange(2 ** 32)
     pre = str(random_code)
     for n, arr_i in enumerate(arr):
-        plt.matshow(arr_i.reshape(plot_width, plot_height), cmap="gray")
+        plt.matshow(arr_i.reshape(plot_width, plot_height), cmap="gray", interpolation="none")
         if invert_y:
             ax = plt.gca()
             ax.set_ylim(ax.get_ylim()[::-1])

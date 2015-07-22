@@ -5,7 +5,7 @@ from scipy import linalg
 import theano
 from theano import tensor
 from theano.sandbox.rng_mrg import MRG_RandomStreams
-from ..utils import tag_expression, concatenate, expression_shape
+from ..utils import concatenate
 from ..utils import calc_expected_dims, names_in_graph, add_arrays_to_graph
 from ..utils import fetch_from_graph, add_random_to_graph
 
@@ -256,90 +256,6 @@ def gaussian_log_sample_layer(list_of_mu_inputs, list_of_log_sigma_inputs,
     return samp
 
 
-def switch_wrap(switch_func, if_true_var, if_false_var, name):
-    """ DEPRECATED """
-    switched = tensor.switch(switch_func, if_true_var, if_false_var)
-    shape = expression_shape(if_true_var)
-    assert shape == expression_shape(if_false_var)
-    tag_expression(switched, name, shape)
-    return switched
-
-
-def rnn_scan_wrap(func, sequences=None, outputs_info=None, non_sequences=None,
-                  n_steps=None, truncate_gradient=-1, go_backwards=False,
-                  mode=None,
-                  name=None, profile=False, allow_gc=None, strict=False):
-    """ DEPRECATED """
-    """ Expects 3D input sequences, dim 0 being the axis of iteration """
-    # assumes 0th output of func is hidden state
-    # necessary so that values out of scan can be tagged... ugh
-    # shape_of_variables eliminates the need for this
-
-    s = expression_shape(sequences[0])
-    shape_0 = s[0]
-    for n, s in enumerate(sequences):
-        s = expression_shape(sequences[n])
-        # all sequences should be the same length
-        tag_expression(sequences[n], name + "_%s_" % n, s[1:])
-
-    outputs, updates = theano.scan(func, sequences=sequences,
-                                   outputs_info=outputs_info,
-                                   non_sequences=non_sequences, n_steps=n_steps,
-                                   truncate_gradient=truncate_gradient,
-                                   go_backwards=go_backwards, mode=mode,
-                                   name=name, profile=profile,
-                                   allow_gc=allow_gc, strict=strict)
-    if type(outputs) is list:
-        for n, o in enumerate(outputs):
-            s = expression_shape(outputs_info[n])
-            # all sequences should be the same length
-            shape_1 = s
-            shape = (shape_0,) + shape_1
-            tag_expression(outputs[n], name + "_%s_" % n, shape)
-    else:
-        s = expression_shape(outputs_info[0])
-        shape_1 = s
-        # combine tuples
-        shape = (shape_0,) + shape_1
-        tag_expression(outputs, name, shape)
-    return outputs, updates
-
-
-def tanh_recurrent_step_layer(list_of_inputs, list_of_hiddens, graph, name,
-                              random_state=None, strict=True):
-    """ DEPRECATED """
-    # All inputs are assumed 2D as are hiddens
-    # Everything is dictated by the size of the hiddens
-    W_name = name + '_tanh_rec_step_W'
-    b_name = name + '_tanh_rec_step_b'
-    U_name = name + '_tanh_rec_step_U'
-    list_of_names = [W_name, b_name, U_name]
-    if not names_in_graph(list_of_names, graph):
-        assert random_state is not None
-        conc_input_dim = int(sum([calc_expected_dims(graph, inp)[-1]
-                                  for inp in list_of_inputs]))
-        conc_hidden_dim = int(sum([calc_expected_dims(graph, hid)[-1]
-                                   for hid in list_of_hiddens]))
-        shape = (conc_input_dim, conc_hidden_dim)
-        np_W = np_rand(shape, random_state)
-        np_b = np_zeros((shape[-1],))
-        np_U = np_ortho((shape[-1], shape[-1]), random_state)
-        add_arrays_to_graph([np_W, np_b, np_U], list_of_names, graph,
-                            strict=strict)
-    else:
-        if strict:
-            raise AttributeError(
-                "Name %s already found in graph with strict mode!" % name)
-
-    W, b, U = fetch_from_graph(list_of_names, graph)
-    # per timestep
-    conc_input = concatenate(list_of_inputs, graph, name + "_input", axis=-1)
-    conc_hidden = concatenate(list_of_hiddens, graph, name + "_hidden", axis=-1)
-    output = tensor.tanh(tensor.dot(conc_input, W) + b +
-                         tensor.dot(conc_hidden, U))
-    return output
-
-
 def tanh_recurrent_layer(list_of_inputs, mask, hidden_dim, graph, name,
                          random_state, strict=True):
     ndim = [len(calc_expected_dims(graph, inp)) for inp in list_of_inputs]
@@ -420,7 +336,7 @@ def gru_recurrent_layer(list_of_inputs, mask, hidden_dim, graph, name,
         np_b = np_zeros((3 * shape[1],))
         np_Urz = np.hstack([np_ortho((shape[1], shape[1]), random_state),
                             np_ortho((shape[1], shape[1]), random_state), ])
-        np_U = np.hstack([np_ortho((shape[1], shape[1]), random_state), ])
+        np_U = np_ortho((shape[1], shape[1]), random_state)
         add_arrays_to_graph([np_W, np_b, np_Urz, np_U], list_of_names, graph,
                             strict=strict)
     else:
@@ -456,72 +372,97 @@ def gru_recurrent_layer(list_of_inputs, mask, hidden_dim, graph, name,
     return h
 
 
-def gru_cond_recurrent(list_of_inputs, list_of_hiddens, mask, hidden_dim,
-                       graph, name, random_state, one_step=False):
+def gru_cond_recurrent_layer(list_of_outputs, hidden_context, output_mask,
+                             hidden_dim, graph, name, random_state,
+                             strict=True):
     """
-    Feed list_of_inputs as unshifted outputs desired. Internally the layer
-    will shift all inputs so that everything is next step prediction.
+    Feed list_of_outputs as unshifted outputs desired. Internally the layer
+    will shift all of them so that everything is next step prediction.
 
-    list_of_hiddens is a list of all the hidden states from the encoders,
+    hidden_context is the hidden states from the encoder,
     in this case only useful to get the last hidden state.
     """
     # an easy interface to gru conditional recurrent nets
-    shape = expression_shape(list_of_inputs[0])
-    import ipdb; ipdb.set_trace()  # XXX BREAKPOINT
     # If the expressions are not the same length and batch size it won't work
-    max_ndim = max([inp.ndim for inp in list_of_inputs])
+    max_ndim = max([out.ndim for out in list_of_outputs])
     if max_ndim > 3:
         raise ValueError("Input with ndim > 3 detected!")
-    elif max_ndim == 2:
-        # Simulate batch size 1
-        shape = (shape[0], 1, shape[1])
 
-    # Can check length for bidirectionality?
-    conc_hiddens = concatenate(list_of_hiddens,
-                               name + "easy_gru_step_context", axis=-1)
-
-    shape = expression_shape(conc_hiddens)
-    context = conc_hiddens[-1]
-    tag_expression(context, name + "_context", shape[1:])
-    # Decoder initializes hidden state with projection of last from encode
+    conc_output = concatenate(list_of_outputs, graph, name + "_gru_cond_step",
+                              axis=-1)
+    context = hidden_context[-1]
+    # Decoder initializes hidden state with tanh projection of last hidden
+    # context representing p(X_1...X_t)
     h0_sym = tanh_layer([context], graph, name + '_h0_proj',
                         proj_dim=hidden_dim, random_state=random_state)
 
-    """
-    # an easy interface to gru recurrent nets
-    h0 = np_zeros((shape[1], hidden_dim))
-    h0_sym = as_shared(h0, name)
-    tag_expression(h0_sym, name, (shape[1], hidden_dim))
-    """
+    shifted = tensor.zeros_like(conc_output)
+    shifted = tensor.set_subtensor(shifted[1:], conc_output[:-1])
+    input_shifted = shifted
 
-    conc_input = concatenate(list_of_inputs, name + "_easy_gru_step", axis=-1)
-    shape = expression_shape(conc_input)
-    shifted = tensor.zeros_like(conc_input)
-    shifted = tensor.set_subtensor(shifted[1:], conc_input[:-1])
-    tag_expression(shifted, name + '_shifted_gru_step', shape)
+    W_name = name + '_gru_cond_rec_step_W'
+    b_name = name + '_gru_cond_rec_step_b'
+    Urz_name = name + '_gru_cond_rec_step_Urz'
+    U_name = name + '_gru_cond_rec_step_U'
+    Wg_name = name + '_gru_cond_rec_step_Wg'
+    bg_name = name + '_gru_cond_rec_step_bg'
+    Wh_name = name + '_gru_cond_rec_step_Wh'
+    bh_name = name + '_gru_cond_rec_step_bh'
+    list_of_names = [W_name, b_name, Urz_name, U_name, Wg_name, bg_name,
+                     Wh_name, bh_name]
+    if not names_in_graph(list_of_names, graph):
+        assert random_state is not None
+        conc_input_dim = calc_expected_dims(graph, input_shifted)[-1]
+        shape = (conc_input_dim, hidden_dim)
+        np_W = np.hstack([np_rand(shape, random_state),
+                          np_rand(shape, random_state),
+                          np_rand(shape, random_state)])
+        np_b = np_zeros((3 * shape[1],))
+        np_Urz = np.hstack([np_ortho((shape[1], shape[1]), random_state),
+                            np_ortho((shape[1], shape[1]), random_state), ])
+        np_U = np_ortho((shape[1], shape[1]), random_state)
+        context_dim = calc_expected_dims(graph, context)[-1]
+        np_Wg = np_rand((context_dim, 2 * shape[1]), random_state)
+        np_bg = np_zeros((2 * shape[1],))
+        np_Wh = np_rand((context_dim, shape[1]), random_state)
+        np_bh = np_zeros((shape[1],))
+        list_of_arrays = [np_W, np_b, np_Urz, np_U, np_Wg, np_bg, np_Wh, np_bh]
+        add_arrays_to_graph(list_of_arrays, list_of_names, graph, strict=strict)
+    else:
+        if strict:
+            raise AttributeError(
+                "Name %s already found in graph with strict mode!" % name)
 
-    def step(y_t, m_t, h_tm1):
-        import ipdb; ipdb.set_trace()  # XXX BREAKPOINT
-        h_ti = gru_recurrent_layer([y_t, context], [h_tm1], graph,
-                                   name + '_easy_gru_rec', random_state)
+    W, b, Urz, U, Wg, bg, Wh, bh = fetch_from_graph(list_of_names, graph)
+    projected_input = tensor.dot(input_shifted, W) + b
+
+    projected_context_to_gates = tensor.dot(context, Wg) + bg
+    projected_context_to_hidden = tensor.dot(context, Wh) + bh
+
+    def _slice(arr, n):
+        # First slice is tensor_dim - 1 sometimes with scan...
+        # need to be *very* careful and test with strict=False and reusing stuff
+        # since shape is redefined in if not names_in_graph...
+        dim = shape[1]
+        if arr.ndim < 2:
+            return arr[n * dim:(n + 1) * dim]
+        return arr[:, n * dim:(n + 1) * dim]
+
+    def step(x_t, m_t, h_tm1, U, pcg, pch):
+        projected_gates = tensor.dot(h_tm1, Urz) + pcg
+        r = tensor.nnet.sigmoid(_slice(x_t, 0) + _slice(projected_gates, 0))
+        z = tensor.nnet.sigmoid(_slice(x_t, 1) + _slice(projected_gates, 1))
+        candidate_h_t = tensor.tanh(_slice(x_t, 2) + tensor.dot(
+            r * h_tm1, U) + pch)
+        h_ti = z * h_tm1 + (1. - z) * candidate_h_t
         h_t = m_t[:, None] * h_ti + (1 - m_t)[:, None] * h_tm1
         return h_t
 
-    if one_step:
-        shape = expression_shape(shifted)
-        sliced = shifted[0]
-        tag_expression(sliced, name, shape[1:])
-        shape = expression_shape(mask)
-        mask_sliced = mask[0]
-        tag_expression(mask_sliced, name + "_mask", shape[1:])
-        h = step(sliced, h0_sym, mask_sliced)
-        shape = expression_shape(sliced)
-        tag_expression(h, name, shape)
-    else:
-        # the hidden state `h` for the entire sequence
-        h, updates = rnn_scan_wrap(step, name=name + '_easy_gru_scan',
-                                   sequences=[shifted, mask],
-                                   outputs_info=[h0_sym])
+    h, updates = theano.scan(step, name=name + '_gru_cond_recurrent_scan',
+                             sequences=[projected_input, output_mask],
+                             outputs_info=[h0_sym],
+                             non_sequences=[U, projected_context_to_gates,
+                                            projected_context_to_hidden])
     return h
 
 

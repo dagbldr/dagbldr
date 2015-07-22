@@ -27,7 +27,8 @@ def plot_training_epochs(epochs_dict, plot_name, plot_limit=None, turn_on_agg=Tr
 
 
 def plot_images_as_subplots(list_of_plot_args, plot_name, width, height,
-                            invert_y=False, invert_x=False, turn_on_agg=True):
+                            invert_y=False, invert_x=False,
+                            figsize=None, turn_on_agg=True):
     if turn_on_agg:
         import matplotlib
         matplotlib.use('Agg')
@@ -36,7 +37,10 @@ def plot_images_as_subplots(list_of_plot_args, plot_name, width, height,
     if len(list(filter(lambda x: x != lengths[0], lengths))) > 0:
         raise ValueError("list_of_plot_args has elements of different lengths!")
 
-    f, axarr = plt.subplots(lengths[0], len(lengths))
+    if figsize is None:
+        f, axarr = plt.subplots(lengths[0], len(lengths))
+    else:
+        f, axarr = plt.subplots(lengths[0], len(lengths), figsize=figsize)
     for n, v in enumerate(list_of_plot_args):
         for i, X_i in enumerate(v):
             axarr[i, n].matshow(X_i.reshape(width, height), cmap="gray", interpolation="none")
@@ -45,6 +49,7 @@ def plot_images_as_subplots(list_of_plot_args, plot_name, width, height,
                 axarr[i, n].set_ylim(axarr[i, n].get_ylim()[::-1])
             if invert_x:
                 axarr[i, n].set_xlim(axarr[i, n].get_xlim()[::-1])
+    plt.tight_layout()
     plt.savefig(plot_name + ".png")
 
 

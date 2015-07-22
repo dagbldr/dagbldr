@@ -128,7 +128,20 @@ def check_fetch_lovecraft():
 
 
 def fetch_lovecraft():
-    """ Returns lovecraft text. """
+    """ All the fiction text written by H. P. Lovecraft
+
+    n_samples : 40363
+    n_features : 84 (Counting UNK, EOS)
+
+    Returns
+    -------
+    summary : dict
+        A dictionary cantaining data
+
+        summary["data"] : list, shape (40363,)
+            List of strings
+
+    """
     data_path = check_fetch_lovecraft()
     all_data = []
     with zipfile.ZipFile(data_path, "r") as f:
@@ -140,7 +153,32 @@ def fetch_lovecraft():
             data = data.split("\n")
             data = [l.strip() for l in data if l != ""]
             all_data.extend(data)
-    return all_data
+    return {"data": all_data}
+
+
+def load_mountains():
+    """ H. P. Lovecraft's At The Mountains Of Madness
+
+    Used for tests which need text data
+
+    n_samples : 3575
+    n_features : 75 (Counting UNK, EOS)
+
+    Returns
+    -------
+    summary : dict
+        A dictionary cantaining data
+
+        summary["data"] : list, shape (3575, 74)
+            List of strings
+
+    """
+    module_path = os.path.dirname(__file__)
+    with open(os.path.join(module_path, 'data', 'mountains.txt')) as f:
+        data = f.read()
+        data = data.split("\n")
+        data = [l.strip() for l in data if l != ""]
+    return {"data": data}
 
 
 def check_fetch_tfd():
@@ -157,16 +195,16 @@ def check_fetch_tfd():
 def fetch_tfd():
     """ Flattened 48x48 TFD faces with pixel values in [0 - 1]
 
-        n_samples : 102236
-        n_features : 2304
+    n_samples : 102236
+    n_features : 2304
 
-        Returns
-        -------
-        summary : dict
-            A dictionary cantaining data and image statistics.
+    Returns
+    -------
+    summary : dict
+        A dictionary cantaining data and image statistics.
 
-            summary["data"] : array, shape (102236, 2304)
-                The flattened data for TFD
+        summary["data"] : array, shape (102236, 2304)
+            The flattened data for TFD
 
     """
     data_path = check_fetch_tfd()
@@ -212,15 +250,15 @@ def check_fetch_frey():
 def fetch_frey():
     """ Flattened 20x28 frey faces with pixel values in [0 - 1]
 
-        n_samples : 1965
-        n_features : 560
+    n_samples : 1965
+    n_features : 560
 
-        Returns
-        -------
-        summary : dict
-            A dictionary cantaining data and image statistics.
+    Returns
+    -------
+    summary : dict
+        A dictionary cantaining data and image statistics.
 
-            summary["data"] : array, shape (1965, 560)
+        summary["data"] : array, shape (1965, 560)
 
     """
     data_path = check_fetch_frey()
@@ -252,19 +290,19 @@ def check_fetch_mnist():
 def fetch_mnist():
     """ Flattened 28x28 mnist digits with pixel values in [0 - 1]
 
-        n_samples : 70000
-        n_feature : 784
+    n_samples : 70000
+    n_feature : 784
 
-        Returns
-        -------
-        summary : dict
-            A dictionary cantaining data and image statistics.
+    Returns
+    -------
+    summary : dict
+        A dictionary cantaining data and image statistics.
 
-            summary["data"] : array, shape (70000, 784)
-            summary["targets"] : array, shape (70000,)
-            summary["train_indices"] : array, shape (50000,)
-            summary["valid_indices"] : array, shape (10000,)
-            summary["test_indices"] : array, shape (10000,)
+        summary["data"] : array, shape (70000, 784)
+        summary["targets"] : array, shape (70000,)
+        summary["train_indices"] : array, shape (50000,)
+        summary["valid_indices"] : array, shape (10000,)
+        summary["test_indices"] : array, shape (10000,)
 
     """
     data_path = check_fetch_mnist()
@@ -314,21 +352,21 @@ def check_fetch_binarized_mnist():
 
 def fetch_binarized_mnist():
     """ Flattened 28x28 mnist digits with pixel of either 0 or 1, sampled from
-        binomial distribution defined by the original MNIST values
+    binomial distribution defined by the original MNIST values
 
-        n_samples : 70000
-        n_features : 784
+    n_samples : 70000
+    n_features : 784
 
-        Returns
-        -------
-        summary : dict
-            A dictionary cantaining data and image statistics.
+    Returns
+    -------
+    summary : dict
+        A dictionary cantaining data and image statistics.
 
-            summary["data"] : array, shape (70000, 784)
-            summary["targets"] : array, shape (70000,)
-            summary["train_indices"] : array, shape (50000,)
-            summary["valid_indices"] : array, shape (10000,)
-            summary["test_indices"] : array, shape (10000,)
+        summary["data"] : array, shape (70000, 784)
+        summary["targets"] : array, shape (70000,)
+        summary["train_indices"] : array, shape (50000,)
+        summary["valid_indices"] : array, shape (10000,)
+        summary["test_indices"] : array, shape (10000,)
 
     """
     mnist = fetch_mnist()

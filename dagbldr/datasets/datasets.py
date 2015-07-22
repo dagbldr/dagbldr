@@ -157,20 +157,21 @@ def fetch_lovecraft():
 
 
 def load_mountains():
-    """ H. P. Lovecraft's At The Mountains Of Madness
+    """
+    H. P. Lovecraft's At The Mountains Of Madness
 
-    Used for tests which need text data
+   Used for tests which need text data
 
-    n_samples : 3575
-    n_features : 75 (Counting UNK, EOS)
+   n_samples : 3575
+   n_features : 75 (Counting UNK, EOS)
 
-    Returns
-    -------
-    summary : dict
-        A dictionary cantaining data
+   Returns
+   -------
+   summary : dict
+       A dictionary cantaining data
 
-        summary["data"] : list, shape (3575, 74)
-            List of strings
+       summary["data"] : list, shape (3575, 74)
+           List of strings
 
     """
     module_path = os.path.dirname(__file__)
@@ -193,7 +194,8 @@ def check_fetch_tfd():
 
 
 def fetch_tfd():
-    """ Flattened 48x48 TFD faces with pixel values in [0 - 1]
+    """
+    Flattened 48x48 TFD faces with pixel values in [0 - 1]
 
     n_samples : 102236
     n_features : 2304
@@ -248,7 +250,8 @@ def check_fetch_frey():
 
 
 def fetch_frey():
-    """ Flattened 20x28 frey faces with pixel values in [0 - 1]
+    """
+    Flattened 20x28 frey faces with pixel values in [0 - 1]
 
     n_samples : 1965
     n_features : 560
@@ -288,7 +291,8 @@ def check_fetch_mnist():
 
 
 def fetch_mnist():
-    """ Flattened 28x28 mnist digits with pixel values in [0 - 1]
+    """
+    Flattened 28x28 mnist digits with pixel values in [0 - 1]
 
     n_samples : 70000
     n_feature : 784
@@ -351,7 +355,8 @@ def check_fetch_binarized_mnist():
 
 
 def fetch_binarized_mnist():
-    """ Flattened 28x28 mnist digits with pixel of either 0 or 1, sampled from
+    """
+    Flattened 28x28 mnist digits with pixel of either 0 or 1, sampled from
     binomial distribution defined by the original MNIST values
 
     n_samples : 70000
@@ -385,7 +390,8 @@ def fetch_binarized_mnist():
 
 
 def make_sincos(n_timesteps, n_pairs):
-    """Generate a 2D array of sine and cosine pairs at random frequencies and
+    """
+    Generate a 2D array of sine and cosine pairs at random frequencies and
     linear phase offsets depending on position in minibatch.
 
     Used for simple testing of RNN algorithms.
@@ -421,7 +427,8 @@ def make_sincos(n_timesteps, n_pairs):
 
 
 def load_iris():
-    """Load and return the iris dataset (classification).
+    """
+    Load and return the iris dataset (classification).
 
     This is basically the sklearn dataset loader, except returning a dictionary.
 
@@ -457,7 +464,8 @@ def load_iris():
 
 
 def load_digits():
-    """Load and return the digits dataset (classification).
+    """
+    Load and return the digits dataset (classification).
 
     This is basically the sklearn dataset loader, except returning a dictionary.
 

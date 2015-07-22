@@ -241,7 +241,7 @@ def alt_shape_of_variables(inputs, outputs, input_shapes):
     try:
         compute_shapes = theano.function(input_dims,
                                          output_dims,
-                                         mode="FAST_COMPILE",
+                                         mode=theano.Mode(optimizer=None),
                                          on_unused_input="ignore")
 
         numeric_input_dims = [dim for kept_idx in kept_input
@@ -257,7 +257,8 @@ def alt_shape_of_variables(inputs, outputs, input_shapes):
                                     if f.name is not None]
         compute_shapes = theano.function(
             [fgraph.inputs[i] for i in dataset_and_mask_indices] + input_dims,
-            output_dims, mode="FAST_COMPILE",
+            output_dims,
+            mode=theano.Mode(optimizer=None),
             on_unused_input="ignore")
 
         numeric_input_dims = [dim for kept_idx in kept_input

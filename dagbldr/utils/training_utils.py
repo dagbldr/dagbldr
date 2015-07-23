@@ -35,13 +35,13 @@ def minibatch_indices(itr, minibatch_size):
         minibatch_indices = np.asarray(list(minibatch_indices) + [len(itr)])
         start_indices = minibatch_indices[:-1]
         end_indices = minibatch_indices[1:]
-        return zip(start_indices, end_indices)
+        return list(zip(start_indices, end_indices))
     else:
         minibatch_indices = np.arange(0, len(itr), minibatch_size)
         minibatch_indices = np.asarray(list(minibatch_indices) + [len(itr)])
         start_indices = minibatch_indices[:-1]
         end_indices = minibatch_indices[1:]
-        return zip(start_indices, end_indices)
+        return list(zip(start_indices, end_indices))
 
 
 def make_character_level_from_text(text):

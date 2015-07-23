@@ -1,6 +1,7 @@
 from nose.tools import assert_raises
 
 from dagbldr.utils import make_character_level_from_text, convert_to_one_hot
+from dagbldr.utils import minibatch_indices
 from dagbldr.datasets import load_digits
 
 digits = load_digits()
@@ -38,3 +39,15 @@ def test_character_level_from_text():
     # Make sure last tag is EOS
     if new_clean[-1] != m["EOS"]:
         raise AssertionError("Failed to add EOS tag")
+
+
+def test_minibatch_indices():
+    total_count = 30
+    d = X[:30]
+    indices = minibatch_indices(d, 10)
+    # test that iterator repeats! py 3 zip will stop generating silently
+    count = 0
+    for n in range(10):
+        for i, j in enumerate(indices):
+            count += 1
+    assert total_count == count

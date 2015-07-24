@@ -65,8 +65,8 @@ def test_gru_cond_recurrent():
     updates = opt.updates(params, grads, learning_rate)
 
     fit_function = theano.function([X_sym, X_mask_sym, y_sym, y_mask_sym],
-                                   [cost], updates=updates,)
-                                   #mode="FAST_COMPILE")
+                                   [cost], updates=updates,
+                                   mode="FAST_COMPILE")
 
     iterate_function(fit_function, [X, y], minibatch_size,
                      list_of_minibatch_functions=[text_minibatch_func],

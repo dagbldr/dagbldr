@@ -1,5 +1,6 @@
 # Author: Kyle Kastner
 # License: BSD 3-clause
+from __future__ import print_function
 import numpy as np
 import numbers
 import theano
@@ -251,7 +252,10 @@ def even_slice(arr, size):
 
 
 def make_minibatch(arg, start, stop):
-    """ Does not handle off-size minibatches """
+    """ Does not handle off-size minibatches
+
+        Returns list of single element for API compat with mask generators
+    """
     if len(arg.shape) == 3:
         return [arg[:, start:stop]]
     else:
@@ -287,9 +291,12 @@ def gen_text_minibatch_func(one_hot_size):
 def iterate_function(func, list_of_minibatch_args, minibatch_size,
                      list_of_non_minibatch_args=None,
                      list_of_minibatch_functions=[make_minibatch],
+                     list_of_preprocessing_functions=None,
                      list_of_output_names=None,
-                     n_epochs=1000, n_status=50,
-                     status_func=default_status_func,
+                     n_epochs=1000,
+                     n_epoch_status=.02,
+                     epoch_status_func=default_status_func,
+                     n_minibatch_status=.02,
                      previous_epoch_results=None,
                      shuffle=False, random_state=None):
     """
@@ -309,6 +316,8 @@ def iterate_function(func, list_of_minibatch_args, minibatch_size,
     which allows for validation, early stopping, checkpointing, etc.
 
     previous_epoch_results allows for continuing from saved checkpoints
+
+    n_minibatch_status
 
     shuffle and random_state are used to determine if minibatches are run
     in sequence or selected randomly each epoch.
@@ -346,12 +355,6 @@ def iterate_function(func, list_of_minibatch_args, minibatch_size,
     # Input checking and setup
     if shuffle:
         assert random_state is not None
-    status_points = list(range(n_epochs))
-    if len(status_points) >= n_status:
-        intermediate_points = status_points[::n_epochs // n_status]
-        status_points = intermediate_points + [status_points[-1]]
-    else:
-        status_points = range(len(status_points))
 
     for arg in list_of_minibatch_args:
         assert len(arg) == len(list_of_minibatch_args[0])
@@ -360,11 +363,47 @@ def iterate_function(func, list_of_minibatch_args, minibatch_size,
     if len(list_of_minibatch_args[0]) % minibatch_size != 0:
         warnings.warn("Length of dataset should be evenly divisible by "
                       "minibatch_size.", UserWarning)
+
+    if n_epoch_status <= 0:
+        raise ValueError("n_epoch_status must be > 0")
+    elif n_epoch_status < 1:
+        n_epoch_status = int(n_epoch_status * n_epochs)
+        if n_epoch_status < 1:
+            # Update once per epoch
+            n_epoch_status = 1
+    assert n_epoch_status > 0
+    assert n_epochs >= n_epoch_status
+
+    if n_minibatch_status <= 0:
+        raise ValueError("n_minibatch_status must be > 0")
+    elif n_minibatch_status < 1:
+        n_minibatch_status = int(n_minibatch_status * len(indices))
+        if n_minibatch_status < 1:
+            # fall back to 1 update
+            n_minibatch_status = len(indices)
+    assert n_minibatch_status > 0
+
+    status_points = list(range(n_epochs))
+    if len(status_points) >= n_epoch_status:
+        intermediate_points = status_points[::n_epochs // n_epoch_status]
+        status_points = intermediate_points + [status_points[-1]]
+    else:
+        status_points = range(len(status_points))
+
     if len(list_of_minibatch_functions) == 1:
         list_of_minibatch_functions = list_of_minibatch_functions * len(
             list_of_minibatch_args)
     else:
         assert len(list_of_minibatch_functions) == len(list_of_minibatch_args)
+
+    if list_of_preprocessing_functions is not None and len(list_of_preprocessing_functions) == 1:
+        list_of_preprocessing_functions = list_of_preprocessing_functions * len(
+            list_of_minibatch_args)
+    elif list_of_preprocessing_functions is not None:
+        assert len(list_of_preprocessing_functions) == len(list_of_minibatch_args)
+    else:
+        assert list_of_preprocessing_functions is None
+
     # Function loop
     global_start = time.time()
     for e in range(n_epochs):
@@ -376,7 +415,12 @@ def iterate_function(func, list_of_minibatch_args, minibatch_size,
             minibatch_start = time.time()
             minibatch_args = []
             for n, arg in enumerate(list_of_minibatch_args):
-                minibatch_args += list_of_minibatch_functions[n](arg, i, j)
+                if list_of_preprocessing_functions is not None:
+                    minibatch_args += [list_of_preprocessing_functions[n](*list_of_minibatch_functions[n](arg, i, j))]
+                else:
+                    # list of minibatch_functions can't always be the right size
+                    # (enc-dec with mask coming from mb func)
+                    minibatch_args += list_of_minibatch_functions[n](arg, i, j)
             if list_of_non_minibatch_args is not None:
                 all_args = minibatch_args + list_of_non_minibatch_args
             else:
@@ -391,11 +435,13 @@ def iterate_function(func, list_of_minibatch_args, minibatch_size,
                         minibatch_results[n])
                 else:
                     results[n].append(minibatch_results[n])
+            if minibatch_count % n_minibatch_status == 0:
+                print("Minibatch %i of %i" % (minibatch_count, len(indices)))
         epoch_stop = time.time()
         output = {r: np.mean(results[r]) for r in results.keys()}
         output["mean_minibatch_time_s"] = (epoch_stop - epoch_start) / float(minibatch_count + 1)
         output["mean_sample_time_s"] = (epoch_stop - epoch_start) / float(
-            len(list_of_minibatch_args[0] * (minibatch_count + 1)))
+            len(list_of_minibatch_args[0]) * (minibatch_count + 1))
         output["this_epoch_time_s"] = epoch_stop - epoch_start
         output["mean_epoch_time_s"] = (epoch_stop - global_start) / float(e + 1)
         output["total_training_time_s"] = epoch_stop - global_start
@@ -403,8 +449,8 @@ def iterate_function(func, list_of_minibatch_args, minibatch_size,
         for k in output.keys():
             epoch_results[k].append(output[k])
         if e in status_points:
-            if status_func is not None:
+            if epoch_status_func is not None:
                 epoch_number = e
                 status_number = np.searchsorted(status_points, e)
-                status_func(status_number, epoch_number, epoch_results)
+                epoch_status_func(status_number, epoch_number, epoch_results)
     return epoch_results

@@ -62,7 +62,7 @@ def test_tanh_rnn():
     updates = opt.updates(params, grads, learning_rate)
 
     fit_function = theano.function([X_sym, X_mask_sym, y_sym, y_mask_sym],
-                                   [cost], updates=updates)
+                                   [cost], updates=updates, mode="FAST_COMPILE")
 
     iterate_function(fit_function, [X, X_mask, y, y_mask], minibatch_size,
                      list_of_output_names=["cost"], n_epochs=1)
@@ -107,7 +107,7 @@ def test_gru_rnn():
     updates = opt.updates(params, grads, learning_rate)
 
     fit_function = theano.function([X_sym, X_mask_sym, y_sym, y_mask_sym],
-                                   [cost], updates=updates)
+                                   [cost], updates=updates, mode="FAST_COMPILE")
 
     iterate_function(fit_function, [X, X_mask, y, y_mask], minibatch_size,
                      list_of_output_names=["cost"], n_epochs=1)
@@ -152,7 +152,7 @@ def test_lstm_rnn():
     updates = opt.updates(params, grads, learning_rate)
 
     fit_function = theano.function([X_sym, X_mask_sym, y_sym, y_mask_sym],
-                                   [cost], updates=updates)
+                                   [cost], updates=updates, mode="FAST_COMPILE")
 
     iterate_function(fit_function, [X, X_mask, y, y_mask], minibatch_size,
                      list_of_output_names=["cost"], n_epochs=1)

@@ -31,7 +31,7 @@ THEANO_COMMIT=bd168a5663ad582b24cee45d284432027e1d790b
 # Configure the conda environment and put it in the path using the
 # provided versions
 conda create -n testenv --yes python=$PYTHON_VERSION pip nose \
-    numpy=$NUMPY_VERSION scipy=$SCIPY_VERSION
+    numpy=$NUMPY_VERSION scipy=$SCIPY_VERSION  pytables
 source activate testenv
 pip install git+git://github.com/Theano/Theano.git@$THEANO_COMMIT
 

@@ -385,7 +385,7 @@ def iterate_function(func, list_of_minibatch_args, minibatch_size,
 
     status_points = list(range(n_epochs))
     if len(status_points) >= n_epoch_status:
-        intermediate_points = status_points[::n_epochs // n_epoch_status]
+        intermediate_points = status_points[::n_epoch_status]
         status_points = intermediate_points + [status_points[-1]]
     else:
         status_points = range(len(status_points))

@@ -8,8 +8,8 @@ from dagbldr.utils import add_datasets_to_graph, get_params_and_grads
 from dagbldr.utils import iterate_function, make_character_level_from_text
 from dagbldr.utils import gen_text_minibatch_func
 from dagbldr.nodes import masked_cost, categorical_crossentropy
-from dagbldr.nodes import softmax_layer
-from dagbldr.nodes import gru_recurrent_layer, gru_cond_recurrent_layer
+from dagbldr.nodes import softmax_layer, shift_layer
+from dagbldr.nodes import gru_recurrent_layer, conditional_gru_recurrent_layer
 
 
 # minibatch size
@@ -47,11 +47,15 @@ def test_gru_cond_recurrent():
     h = gru_recurrent_layer([X_sym], X_mask_sym, n_hid, graph, 'l1_end',
                             random_state)
 
-    h_dec = gru_cond_recurrent_layer([y_sym], h, y_mask_sym, n_hid, graph,
-                                     'l2_dec', random_state)
+    shifted_y_sym = shift_layer([y_sym], graph, 'shift')
+
+    h_dec, context = conditional_gru_recurrent_layer([y_sym], [h], y_mask_sym,
+                                                     n_hid, graph, 'l2_dec',
+                                                     random_state)
 
     # linear output activation
-    y_hat = softmax_layer([h_dec], graph, 'l2_proj', n_out, random_state)
+    y_hat = softmax_layer([h_dec, context, shifted_y_sym], graph, 'l2_proj',
+                          n_out, random_state)
 
     # error between output and target
     cost = categorical_crossentropy(y_hat, y_sym)

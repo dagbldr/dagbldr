@@ -370,7 +370,7 @@ def iterate_function(func, list_of_minibatch_args, minibatch_size,
         n_epoch_status = int(n_epoch_status * n_epochs)
         if n_epoch_status < 1:
             # Update once per epoch
-            n_epoch_status = 1
+            n_epoch_status = n_epochs
     assert n_epoch_status > 0
     assert n_epochs >= n_epoch_status
 
@@ -396,11 +396,13 @@ def iterate_function(func, list_of_minibatch_args, minibatch_size,
     else:
         assert len(list_of_minibatch_functions) == len(list_of_minibatch_args)
 
-    if list_of_preprocessing_functions is not None and len(list_of_preprocessing_functions) == 1:
+    if list_of_preprocessing_functions is not None and len(
+      list_of_preprocessing_functions) == 1:
         list_of_preprocessing_functions = list_of_preprocessing_functions * len(
             list_of_minibatch_args)
     elif list_of_preprocessing_functions is not None:
-        assert len(list_of_preprocessing_functions) == len(list_of_minibatch_args)
+        assert len(list_of_preprocessing_functions) == len(
+            list_of_minibatch_args)
     else:
         assert list_of_preprocessing_functions is None
 
@@ -412,11 +414,11 @@ def iterate_function(func, list_of_minibatch_args, minibatch_size,
         if shuffle:
             random_state.shuffle(indices)
         for minibatch_count, (i, j) in enumerate(indices):
-            minibatch_start = time.time()
             minibatch_args = []
             for n, arg in enumerate(list_of_minibatch_args):
                 if list_of_preprocessing_functions is not None:
-                    minibatch_args += [list_of_preprocessing_functions[n](*list_of_minibatch_functions[n](arg, i, j))]
+                    minibatch_args += [list_of_preprocessing_functions[n](
+                        *list_of_minibatch_functions[n](arg, i, j))]
                 else:
                     # list of minibatch_functions can't always be the right size
                     # (enc-dec with mask coming from mb func)
@@ -436,10 +438,11 @@ def iterate_function(func, list_of_minibatch_args, minibatch_size,
                 else:
                     results[n].append(minibatch_results[n])
             if minibatch_count % n_minibatch_status == 0:
-                print("Minibatch %i of %i" % (minibatch_count, len(indices)))
+                print("minibatch %i/%i" % (minibatch_count, len(indices) - 1))
         epoch_stop = time.time()
         output = {r: np.mean(results[r]) for r in results.keys()}
-        output["mean_minibatch_time_s"] = (epoch_stop - epoch_start) / float(minibatch_count + 1)
+        output["mean_minibatch_time_s"] = (epoch_stop - epoch_start) / float(
+            minibatch_count + 1)
         output["mean_sample_time_s"] = (epoch_stop - epoch_start) / float(
             len(list_of_minibatch_args[0]) * (minibatch_count + 1))
         output["this_epoch_time_s"] = epoch_stop - epoch_start

@@ -37,21 +37,13 @@ def add_memory_swapper(earray, mem_size):
         assert start >= 0
         assert stop >= 0
         assert stop >= start
-        # 10% overlap - raise a value error if the slice is too big
-        n_chunks = int(float(n_samples) / n_samples_that_fit) + 1
-        overlap = int(.1 * n_samples_that_fit) + 1
         slice_size = stop - start
-        assert overlap > slice_size
-        chunk_bounds = np.arange(0, n_samples, n_samples_that_fit)
-        chunk_bounds = np.append(chunk_bounds, n_samples)
-        chunk_starts = chunk_bounds - overlap
-        chunk_starts[0] = 0
-        chunk_stops = chunk_starts + n_samples_that_fit
-        chunk_stops[-1] = n_samples
-        assert len(chunk_starts) == len(chunk_stops)
-        chunk_limits = list(zip(chunk_starts, chunk_stops))
-        slice_limit = [cl for cl in chunk_limits if cl[0] <= start][-1]
-        earray._in_mem_limits = [slice_limit[0], slice_limit[1]]
+        if slice_size > n_samples_that_fit:
+            err_str = "Slice from [%i:%i] (size %i) too large! " % (start, stop, slice_size)
+            err_str += "Max slice size %i" % n_samples_that_fit
+            raise ValueError(err_str)
+        slice_limit = [start, stop]
+        earray._in_mem_limits = slice_limit
         if earray._in_mem_slice.shape[0] == 1:
             # allocate memory
             print("Allocating %i bytes of memory for EArray swap buffer" % earray._in_mem_size)
@@ -64,6 +56,8 @@ def add_memory_swapper(earray, mem_size):
 
     def getter(self, key):
         if isinstance(key, numbers.Integral) or isinstance(key, np.integer):
+            if key < 0:
+                key = len(self) - 1 - key
             if _check_in_mem(self, key, key):
                 lower = self._in_mem_limits[0]
             else:

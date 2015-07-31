@@ -3,17 +3,22 @@
 # Ideas from Junyoung Chung and Kyunghyun Cho
 # See https://github.com/jych/cle for a library in this style
 import numpy as np
+from collections import Counter
 from scipy.io import loadmat
 from scipy.linalg import svd
+import string
 import theano
 import zipfile
 import gzip
 import os
+import re
 import csv
 try:
     import cPickle as pickle
 except ImportError:
     import pickle
+
+regex = re.compile('[%s]' % re.escape(string.punctuation))
 
 
 def get_dataset_dir(dataset_name, data_dir=None, folder=None, create_dir=True):
@@ -131,7 +136,8 @@ def fetch_lovecraft():
     """ All the fiction text written by H. P. Lovecraft
 
     n_samples : 40363
-    n_features : 84 (Counting UNK, EOS)
+    n_chars : 84 (Counting UNK, EOS)
+    n_words : 26644 (Counting UNK)
 
     Returns
     -------
@@ -141,9 +147,13 @@ def fetch_lovecraft():
         summary["data"] : list, shape (40363,)
             List of strings
 
+        summary["words"] : list,
+            List of strings
+
     """
     data_path = check_fetch_lovecraft()
     all_data = []
+    all_words = Counter()
     with zipfile.ZipFile(data_path, "r") as f:
         for name in f.namelist():
             if ".txt" not in name:
@@ -152,34 +162,46 @@ def fetch_lovecraft():
             data = f.read(name)
             data = data.split("\n")
             data = [l.strip() for l in data if l != ""]
+            words = [w for l in data for w in regex.sub('', l.lower()).split(
+                " ") if w != ""]
             all_data.extend(data)
-    return {"data": all_data}
+            all_words.update(words)
+    return {"data": all_data,
+            "words": all_words.keys()}
 
 
 def load_mountains():
     """
     H. P. Lovecraft's At The Mountains Of Madness
 
-   Used for tests which need text data
+    Used for tests which need text data
 
-   n_samples : 3575
-   n_features : 75 (Counting UNK, EOS)
+    n_samples : 3575
+    n_chars : 75 (Counting UNK, EOS)
+    n_words : 6346 (Counting UNK)
 
-   Returns
-   -------
-   summary : dict
-       A dictionary cantaining data
+    Returns
+    -------
+    summary : dict
+        A dictionary cantaining data
 
-       summary["data"] : list, shape (3575, 74)
-           List of strings
+        summary["data"] : list, shape (3575, )
+            List of strings
+
+        summary["words"] : list,
 
     """
     module_path = os.path.dirname(__file__)
+    all_words = Counter()
     with open(os.path.join(module_path, 'data', 'mountains.txt')) as f:
         data = f.read()
         data = data.split("\n")
         data = [l.strip() for l in data if l != ""]
-    return {"data": data}
+        words = [w for l in data for w in regex.sub('', l.lower()).split(
+            " ") if l != ""]
+        all_words.update(words)
+    return {"data": data,
+            "words": all_words.keys()}
 
 
 def check_fetch_tfd():

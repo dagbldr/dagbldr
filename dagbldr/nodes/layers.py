@@ -49,7 +49,7 @@ def softplus(X):
 
 
 def relu(X):
-    return X * (X > 1)
+    return X * (X > 0)
 
 
 def linear(X):
@@ -372,42 +372,54 @@ def gru_recurrent_layer(list_of_inputs, mask, hidden_dim, graph, name,
     return h
 
 
-def gru_cond_recurrent_layer(list_of_outputs, hidden_context, output_mask,
-                             hidden_dim, graph, name, random_state,
-                             strict=True):
+def shift_layer(list_of_inputs, graph, name):
     """
-    Feed list_of_outputs as unshifted outputs desired. Internally the layer
-    will shift all of them so that everything is next step prediction.
+    Shifts along the first axis by one step, filling with 0 in the first step
+    """
+    conc_input = concatenate(list_of_inputs, graph, name + "_shifted",
+                             axis=-1)
+    shifted = tensor.zeros_like(conc_input)
+    shifted = tensor.set_subtensor(shifted[1:], conc_input[:-1])
+    return shifted
+
+
+def conditional_gru_recurrent_layer(list_of_outputs, list_of_hiddens,
+                                    output_mask, hidden_dim, graph, name,
+                                    random_state, strict=True):
+    """
+    Feed list_of_outputs as unshifted outputs desired. Internally the node
+    will shift by one time step.
 
     hidden_context is the hidden states from the encoder,
     in this case only useful to get the last hidden state.
     """
-    # an easy interface to gru conditional recurrent nets
+    # an easy interface to conditional gru recurrent nets
     # If the expressions are not the same length and batch size it won't work
     max_ndim = max([out.ndim for out in list_of_outputs])
     if max_ndim > 3:
         raise ValueError("Input with ndim > 3 detected!")
 
-    conc_output = concatenate(list_of_outputs, graph, name + "_gru_cond_step",
+    conc_output = concatenate(list_of_outputs, graph, name + "_cond_gru_step",
                               axis=-1)
-    context = hidden_context[-1]
+    conc_hidden = concatenate(list_of_hiddens, graph, name + "_cond_gru_hid",
+                              axis=-1)
+    context = conc_hidden[-1]
     # Decoder initializes hidden state with tanh projection of last hidden
     # context representing p(X_1...X_t)
     h0_sym = tanh_layer([context], graph, name + '_h0_proj',
                         proj_dim=hidden_dim, random_state=random_state)
-
     shifted = tensor.zeros_like(conc_output)
     shifted = tensor.set_subtensor(shifted[1:], conc_output[:-1])
     input_shifted = shifted
 
-    W_name = name + '_gru_cond_rec_step_W'
-    b_name = name + '_gru_cond_rec_step_b'
-    Urz_name = name + '_gru_cond_rec_step_Urz'
-    U_name = name + '_gru_cond_rec_step_U'
-    Wg_name = name + '_gru_cond_rec_step_Wg'
-    bg_name = name + '_gru_cond_rec_step_bg'
-    Wh_name = name + '_gru_cond_rec_step_Wh'
-    bh_name = name + '_gru_cond_rec_step_bh'
+    W_name = name + '_cond_gru_rec_step_W'
+    b_name = name + '_cond_gru_rec_step_b'
+    Urz_name = name + '_cond_gru_rec_step_Urz'
+    U_name = name + '_cond_gru_rec_step_U'
+    Wg_name = name + '_cond_gru_rec_step_Wg'
+    bg_name = name + '_cond_gru_rec_step_bg'
+    Wh_name = name + '_cond_gru_rec_step_Wh'
+    bh_name = name + '_cond_gru_rec_step_bh'
     list_of_names = [W_name, b_name, Urz_name, U_name, Wg_name, bg_name,
                      Wh_name, bh_name]
     if not names_in_graph(list_of_names, graph):
@@ -435,7 +447,6 @@ def gru_cond_recurrent_layer(list_of_outputs, hidden_context, output_mask,
 
     W, b, Urz, U, Wg, bg, Wh, bh = fetch_from_graph(list_of_names, graph)
     projected_input = tensor.dot(input_shifted, W) + b
-
     projected_context_to_gates = tensor.dot(context, Wg) + bg
     projected_context_to_hidden = tensor.dot(context, Wh) + bh
 
@@ -458,12 +469,13 @@ def gru_cond_recurrent_layer(list_of_outputs, hidden_context, output_mask,
         h_t = m_t[:, None] * h_ti + (1 - m_t)[:, None] * h_tm1
         return h_t
 
-    h, updates = theano.scan(step, name=name + '_gru_cond_recurrent_scan',
+    h, updates = theano.scan(step, name=name + '_cond_gru_recurrent_scan',
                              sequences=[projected_input, output_mask],
                              outputs_info=[h0_sym],
                              non_sequences=[U, projected_context_to_gates,
                                             projected_context_to_hidden])
-    return h
+    final_context = context.dimshuffle('x', 0, 1) * tensor.ones_like(h)
+    return h, final_context
 
 
 def lstm_recurrent_layer(list_of_inputs, mask, hidden_dim, graph, name,

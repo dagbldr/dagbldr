@@ -56,8 +56,9 @@ def add_memory_swapper(earray, mem_size):
 
     def getter(self, key):
         if isinstance(key, numbers.Integral) or isinstance(key, np.integer):
+            start, stop, step = self._processRange(key, key, 1)
             if key < 0:
-                key = len(self) - 1 - key
+                key = start
             if _check_in_mem(self, key, key):
                 lower = self._in_mem_limits[0]
             else:

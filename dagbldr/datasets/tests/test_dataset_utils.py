@@ -7,7 +7,8 @@ import numpy as np
 
 def test_add_memory_swapper():
     n_samples = 1000
-    n_features = 2500
+    n_features0 = 250
+    n_features1 = 10
     # 10 MB = 10E6 Bytes
     # 4 Bytes per float32, 2.5E6 items
     # This does an in-memory hdf5 so no saving to disk
@@ -17,10 +18,11 @@ def test_add_memory_swapper():
                                  driver_core_backing_store=0)
     data = hdf5_file.createEArray(hdf5_file.root, 'data',
                                   tables.Float32Atom(),
-                                  shape=(0, n_features),
+                                  shape=(0, n_features0, n_features1),
                                   expectedrows=n_samples)
     random_state = np.random.RandomState(1999)
-    r = random_state.rand(n_samples, n_features).astype("float32")
+    r = random_state.rand(n_samples, n_features0,
+                          n_features1).astype("float32")
     for n in range(len(r)):
         data.append(r[n][None])
 

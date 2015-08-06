@@ -10,6 +10,7 @@ from dagbldr.utils import gen_text_minibatch_func
 from dagbldr.nodes import masked_cost, categorical_crossentropy
 from dagbldr.nodes import softmax_layer, shift_layer
 from dagbldr.nodes import gru_recurrent_layer, conditional_gru_recurrent_layer
+from dagbldr.nodes import conditional_attention_gru_recurrent_layer
 
 
 # minibatch size
@@ -31,7 +32,7 @@ X_mb, X_mask = text_minibatch_func(X, 0, minibatch_size)
 y_mb, y_mask = text_minibatch_func(y, 0, minibatch_size)
 
 
-def test_gru_cond_recurrent():
+def test_conditional_gru_recurrent():
     random_state = np.random.RandomState(1999)
     graph = OrderedDict()
     n_hid = 10
@@ -52,6 +53,52 @@ def test_gru_cond_recurrent():
     h_dec, context = conditional_gru_recurrent_layer([y_sym], [h], y_mask_sym,
                                                      n_hid, graph, 'l2_dec',
                                                      random_state)
+
+    # linear output activation
+    y_hat = softmax_layer([h_dec, context, shifted_y_sym], graph, 'l2_proj',
+                          n_out, random_state)
+
+    # error between output and target
+    cost = categorical_crossentropy(y_hat, y_sym)
+    cost = masked_cost(cost, y_mask_sym).mean()
+    # Parameters of the model
+    params, grads = get_params_and_grads(graph, cost)
+
+    # Use stochastic gradient descent to optimize
+    opt = sgd(params)
+    learning_rate = 0.01
+    updates = opt.updates(params, grads, learning_rate)
+
+    fit_function = theano.function([X_sym, X_mask_sym, y_sym, y_mask_sym],
+                                   [cost], updates=updates,
+                                   mode="FAST_COMPILE")
+
+    iterate_function(fit_function, [X, y], minibatch_size,
+                     list_of_minibatch_functions=[text_minibatch_func],
+                     list_of_output_names=["cost"], n_epochs=1)
+
+
+def test_conditional_attention_gru_recurrent():
+    random_state = np.random.RandomState(1999)
+    graph = OrderedDict()
+    n_hid = 10
+    n_out = n_chars
+
+    # input (where first dimension is time)
+    datasets_list = [X_mb, X_mask, y_mb, y_mask]
+    names_list = ["X", "X_mask", "y", "y_mask"]
+    test_values_list = [X, X_mask, y, y_mask]
+    X_sym, X_mask_sym, y_sym, y_mask_sym = add_datasets_to_graph(
+        datasets_list, names_list, graph, list_of_test_values=test_values_list)
+
+    h = gru_recurrent_layer([X_sym], X_mask_sym, n_hid, graph, 'l1_end',
+                            random_state)
+
+    shifted_y_sym = shift_layer([y_sym], graph, 'shift')
+
+    h_dec, context, attention = conditional_attention_gru_recurrent_layer(
+        [y_sym], [h], y_mask_sym, X_mask_sym, n_hid, graph, 'l2_dec',
+        random_state)
 
     # linear output activation
     y_hat = softmax_layer([h_dec, context, shifted_y_sym], graph, 'l2_proj',

@@ -10,6 +10,7 @@ from dagbldr.utils import gen_text_minibatch_func
 from dagbldr.nodes import masked_cost, categorical_crossentropy
 from dagbldr.nodes import softmax_layer, shift_layer
 from dagbldr.nodes import gru_recurrent_layer, conditional_gru_recurrent_layer
+from dagbldr.nodes import bidirectional_gru_recurrent_layer
 from dagbldr.nodes import conditional_attention_gru_recurrent_layer
 
 
@@ -91,8 +92,8 @@ def test_conditional_attention_gru_recurrent():
     X_sym, X_mask_sym, y_sym, y_mask_sym = add_datasets_to_graph(
         datasets_list, names_list, graph, list_of_test_values=test_values_list)
 
-    h = gru_recurrent_layer([X_sym], X_mask_sym, n_hid, graph, 'l1_end',
-                            random_state)
+    h = bidirectional_gru_recurrent_layer([X_sym], X_mask_sym, n_hid, graph,
+                                          'l1_end', random_state)
 
     shifted_y_sym = shift_layer([y_sym], graph, 'shift')
 

@@ -372,6 +372,17 @@ def gru_recurrent_layer(list_of_inputs, mask, hidden_dim, graph, name,
     return h
 
 
+def bidirectional_gru_recurrent_layer(list_of_inputs, mask, hidden_dim, graph,
+                                      name, random_state, strict=True):
+    h_f = gru_recurrent_layer(list_of_inputs, mask, hidden_dim, graph,
+                              name + "_f", random_state, strict=strict)
+    h_r = gru_recurrent_layer([i[::-1] for i in list_of_inputs], mask[::-1],
+                              hidden_dim, graph, name + "_r", random_state,
+                              strict=strict)
+    h = concatenate([h_f, h_r[::-1]], graph, name=name + "_conc", axis=-1)
+    return h
+
+
 def shift_layer(list_of_inputs, graph, name):
     """
     Shifts along the first axis by one step, filling with 0 in the first step
@@ -406,8 +417,9 @@ def conditional_gru_recurrent_layer(list_of_outputs, list_of_hiddens,
     context = conc_hidden[-1]
     # Decoder initializes hidden state with tanh projection of last hidden
     # context representing p(X_1...X_t)
+    conc_hidden_dim = calc_expected_dims(graph, conc_hidden)[-1]
     h0_sym = tanh_layer([context], graph, name + '_h0_proj',
-                        proj_dim=hidden_dim, random_state=random_state)
+                        proj_dim=conc_hidden_dim, random_state=random_state)
     shifted = tensor.zeros_like(conc_output)
     shifted = tensor.set_subtensor(shifted[1:], conc_output[:-1])
     input_shifted = shifted
@@ -502,11 +514,13 @@ def conditional_attention_gru_recurrent_layer(list_of_outputs, list_of_hiddens,
     context = conc_hidden.mean(axis=0)
     # Decoder initializes hidden state with tanh projection of last hidden
     # context representing p(X_1...X_t)
+    conc_hidden_dim = calc_expected_dims(graph, conc_hidden)[-1]
     h0_sym = tanh_layer([context], graph, name + '_h0_proj',
-                        proj_dim=hidden_dim, random_state=random_state)
+                        proj_dim=conc_hidden_dim, random_state=random_state)
     shifted = tensor.zeros_like(conc_output)
     shifted = tensor.set_subtensor(shifted[1:], conc_output[:-1])
     input_shifted = shifted
+    conc_input_dim = calc_expected_dims(graph, input_shifted)[-1]
 
     # GRU weights
     W_name = name + '_cond_gru_rec_step_W'
@@ -535,8 +549,6 @@ def conditional_attention_gru_recurrent_layer(list_of_outputs, list_of_hiddens,
                      Ws_att_name, Wp_att_name, bp_att_name]
     if not names_in_graph(list_of_names, graph):
         assert random_state is not None
-        conc_input_dim = calc_expected_dims(graph, input_shifted)[-1]
-        conc_hidden_dim = calc_expected_dims(graph, conc_hidden)[-1]
         np_W = np_rand((conc_input_dim, 3 * conc_hidden_dim), random_state)
         np_b = np_zeros((3 * conc_hidden_dim))
         np_Urz = np.hstack([np_ortho((conc_hidden_dim, conc_hidden_dim),
@@ -600,14 +612,15 @@ def conditional_attention_gru_recurrent_layer(list_of_outputs, list_of_hiddens,
     def step(x_t, m_t, att_i_t,
              h_tm1, ctx_tm1, att_w_tm1,
              proj_hid_att, conc_hidden, U, W, W_cth, W_ctc, Ws_att,
-             Wp_Att, bp_att, Wc_att, Urz, hidden_mask):
+             Wp_att, bp_att, Wc_att, Urz, hidden_mask):
         att_s = tensor.dot(h_tm1, Ws_att)
         att = proj_hid_att + att_s[None, :, :]
         att += att_i_t
         att = tensor.tanh(att)
         att_w_t = tensor.dot(att, Wp_att) + bp_att
         att_w_t = att_w_t.reshape((att_w_t.shape[0], att_w_t.shape[1]))  # ?
-        att_w_t = tensor.exp(att_w_t - att_w_t.max(axis=0, keepdims=True))
+        att_w_t_max = (att_w_t * hidden_mask).max(axis=0, keepdims=True)
+        att_w_t = tensor.exp(att_w_t - att_w_t_max)
         att_w_t = hidden_mask * att_w_t
         att_w_t = att_w_t / att_w_t.sum(axis=0, keepdims=True)
         ctx_t = (conc_hidden * att_w_t[:, :, None]).sum(axis=0)

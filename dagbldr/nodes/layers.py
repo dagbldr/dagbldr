@@ -352,8 +352,8 @@ def gru_recurrent_layer(list_of_inputs, mask, hidden_dim, graph, name,
         # need to be *very* careful and test with strict=False and reusing stuff
         # since shape is redefined in if not names_in_graph...
         dim = shape[1]
-        if arr.ndim < 2:
-            return arr[n * dim:(n + 1) * dim]
+        if arr.ndim == 3:
+            return arr[:, :, n * dim:(n + 1) * dim]
         return arr[:, n * dim:(n + 1) * dim]
 
     def step(x_t, m_t, h_tm1, U):
@@ -455,16 +455,16 @@ def conditional_gru_recurrent_layer(list_of_outputs, list_of_hiddens,
         # need to be *very* careful and test with strict=False and reusing stuff
         # since shape is redefined in if not names_in_graph...
         dim = shape[1]
-        if arr.ndim < 2:
-            return arr[n * dim:(n + 1) * dim]
+        if arr.ndim == 3:
+            return arr[:, :, n * dim:(n + 1) * dim]
         return arr[:, n * dim:(n + 1) * dim]
 
     def step(x_t, m_t, h_tm1, U, pcg, pch):
         projected_gates = tensor.dot(h_tm1, Urz) + pcg
         r = tensor.nnet.sigmoid(_slice(x_t, 0) + _slice(projected_gates, 0))
         z = tensor.nnet.sigmoid(_slice(x_t, 1) + _slice(projected_gates, 1))
-        candidate_h_t = tensor.tanh(_slice(x_t, 2) + tensor.dot(
-            r * h_tm1, U) + pch)
+        candidate_h_t = tensor.tanh(_slice(x_t, 2) + r * tensor.dot(
+            h_tm1, U) + pch)
         h_ti = z * h_tm1 + (1. - z) * candidate_h_t
         h_t = m_t[:, None] * h_ti + (1 - m_t)[:, None] * h_tm1
         return h_t
@@ -476,6 +476,166 @@ def conditional_gru_recurrent_layer(list_of_outputs, list_of_hiddens,
                                             projected_context_to_hidden])
     final_context = context.dimshuffle('x', 0, 1) * tensor.ones_like(h)
     return h, final_context
+
+
+def conditional_attention_gru_recurrent_layer(list_of_outputs, list_of_hiddens,
+                                              output_mask, hidden_mask,
+                                              hidden_dim, graph,
+                                              name, random_state, strict=True):
+    """
+    Feed list_of_outputs as unshifted outputs desired. Internally the node
+    will shift by one time step.
+
+    hidden_context is the hidden states from the encoder,
+    in this case only useful to get the last hidden state.
+    """
+    # an easy interface to conditional gru recurrent nets
+    # If the expressions are not the same length and batch size it won't work
+    max_ndim = max([out.ndim for out in list_of_outputs])
+    if max_ndim > 3:
+        raise ValueError("Input with ndim > 3 detected!")
+
+    conc_output = concatenate(list_of_outputs, graph, name + "_cond_gru_step",
+                              axis=-1)
+    conc_hidden = concatenate(list_of_hiddens, graph, name + "_cond_gru_hid",
+                              axis=-1)
+    context = conc_hidden.mean(axis=0)
+    # Decoder initializes hidden state with tanh projection of last hidden
+    # context representing p(X_1...X_t)
+    h0_sym = tanh_layer([context], graph, name + '_h0_proj',
+                        proj_dim=hidden_dim, random_state=random_state)
+    shifted = tensor.zeros_like(conc_output)
+    shifted = tensor.set_subtensor(shifted[1:], conc_output[:-1])
+    input_shifted = shifted
+
+    # GRU weights
+    W_name = name + '_cond_gru_rec_step_W'
+    b_name = name + '_cond_gru_rec_step_b'
+    Urz_name = name + '_cond_gru_rec_step_Urz'
+    U_name = name + '_cond_gru_rec_step_U'
+
+    W_context_to_hidden_name = name + '_cond_gru_rec_step_W_cth'
+    W_context_to_candidate_name = name + '_cond_gru_rec_step_W_ctc'
+    # Attention weights
+    # Attention over shifted input sequence
+    Wi_att_name = name + '_cond_gru_step_Wi_att'
+    # Attention over previous hiddens
+    Wc_att_name = name + '_cond_gru_step_Wc_att'
+    # Attention bias for all, applied to Wc_att
+    b_att = name + '_cond_gru_step_b_att'
+    # Attention over state
+    Ws_att_name = name + '_cond_gru_step_Ws_att'
+    # Attention weights into softmax
+    Wp_att_name = name + '_cond_gru_step_Wp_att'
+    bp_att_name = name + '_cond_gru_step_bp_att'
+
+    list_of_names = [W_name, b_name, Urz_name, U_name,
+                     W_context_to_hidden_name, W_context_to_candidate_name,
+                     Wi_att_name, Wc_att_name, b_att,
+                     Ws_att_name, Wp_att_name, bp_att_name]
+    if not names_in_graph(list_of_names, graph):
+        assert random_state is not None
+        conc_input_dim = calc_expected_dims(graph, input_shifted)[-1]
+        conc_hidden_dim = calc_expected_dims(graph, conc_hidden)[-1]
+        np_W = np_rand((conc_input_dim, 3 * conc_hidden_dim), random_state)
+        np_b = np_zeros((3 * conc_hidden_dim))
+        np_Urz = np.hstack([np_ortho((conc_hidden_dim, conc_hidden_dim),
+                                     random_state),
+                            np_ortho((conc_hidden_dim, conc_hidden_dim),
+                                     random_state)])
+        np_U = np_ortho((conc_hidden_dim, conc_hidden_dim), random_state)
+
+        np_W_context_to_hidden = np_rand((conc_hidden_dim, 2 * conc_hidden_dim),
+                                         random_state)
+        np_W_context_to_candidate = np_rand((conc_hidden_dim, conc_hidden_dim),
+                                            random_state)
+        # Init attention weights
+        np_Wi_att = np_rand((conc_input_dim, conc_hidden_dim), random_state)
+        np_Wc_att = np_ortho((conc_hidden_dim, conc_hidden_dim), random_state)
+        np_b_att = np_zeros((conc_hidden_dim,))
+        np_Ws_att = np_ortho((conc_hidden_dim, conc_hidden_dim), random_state)
+        np_Wp_att = np_rand((conc_hidden_dim, 1), random_state)
+        np_bp_att = np_zeros((1,))
+
+        list_of_arrays = [np_W, np_b, np_Urz, np_U,
+                          np_W_context_to_hidden, np_W_context_to_candidate,
+                          np_Wi_att, np_Wc_att,
+                          np_b_att, np_Ws_att, np_Wp_att, np_bp_att]
+        add_arrays_to_graph(list_of_arrays, list_of_names, graph, strict=strict)
+    else:
+        if strict:
+            raise AttributeError(
+                "Name %s already found in graph with strict mode!" % name)
+
+    (W, b, Urz, U,
+     W_context_to_hidden, W_context_to_candidate,
+     Wi_att, Wc_att, b_att, Ws_att,
+     Wp_att, bp_att) = fetch_from_graph(list_of_names, graph)
+    projected_hidden_attention = tensor.dot(conc_hidden, Wc_att) + b_att
+    projected_input_attention = tensor.dot(input_shifted, Wi_att)
+    projected_input = tensor.dot(input_shifted, W) + b
+
+    def _slice(arr, n):
+        # First slice is tensor_dim - 1 sometimes with scan...
+        # need to be *very* careful and test with strict=False and reusing stuff
+        # since shape is redefined in if not names_in_graph...
+        dim = conc_hidden_dim
+        if arr.ndim == 3:
+            return arr[:, :, n * dim:(n + 1) * dim]
+        return arr[:, n * dim:(n + 1) * dim]
+
+    sequences = [projected_input, output_mask, projected_input_attention]
+    (n_input_steps, n_samples, n_features) = conc_hidden.shape
+    ctx0_sym = tensor.cast(tensor.alloc(0., n_samples, n_features),
+                           theano.config.floatX)
+    att0_sym = tensor.cast(tensor.alloc(0., n_samples, n_input_steps),
+                           theano.config.floatX)
+
+    outputs = [h0_sym, ctx0_sym, att0_sym]
+    non_sequences = [projected_hidden_attention, conc_hidden,
+                     U, W, W_context_to_hidden, W_context_to_candidate,
+                     Ws_att, Wp_att, bp_att,
+                     Wc_att, Urz, hidden_mask]
+
+    def step(x_t, m_t, att_i_t,
+             h_tm1, ctx_tm1, att_w_tm1,
+             proj_hid_att, conc_hidden, U, W, W_cth, W_ctc, Ws_att,
+             Wp_Att, bp_att, Wc_att, Urz, hidden_mask):
+        att_s = tensor.dot(h_tm1, Ws_att)
+        att = proj_hid_att + att_s[None, :, :]
+        att += att_i_t
+        att = tensor.tanh(att)
+        att_w_t = tensor.dot(att, Wp_att) + bp_att
+        att_w_t = att_w_t.reshape((att_w_t.shape[0], att_w_t.shape[1]))  # ?
+        att_w_t = tensor.exp(att_w_t - att_w_t.max(axis=0, keepdims=True))
+        att_w_t = hidden_mask * att_w_t
+        att_w_t = att_w_t / att_w_t.sum(axis=0, keepdims=True)
+        ctx_t = (conc_hidden * att_w_t[:, :, None]).sum(axis=0)
+
+        projected_state = tensor.dot(h_tm1, Urz)
+        projected_state += tensor.dot(ctx_t, W_cth)
+
+        r = tensor.nnet.sigmoid(_slice(x_t, 0) + _slice(projected_state, 0))
+        z = tensor.nnet.sigmoid(_slice(x_t, 1) + _slice(projected_state, 1))
+        candidate_h_t = tensor.tanh(_slice(x_t, 2) + r * tensor.dot(
+            h_tm1, U) + tensor.dot(ctx_t, W_ctc))
+
+        h_ti = z * h_tm1 + (1. - z) * candidate_h_t
+        h_t = m_t[:, None] * h_ti + (1 - m_t)[:, None] * h_tm1
+        return h_t, ctx_t, att_w_t.T
+
+    """
+    # Single step call
+    s0 = [s[0] for s in sequences]
+    outs_t = step(*(s0 + outputs + non_sequences))
+    """
+
+    (h, context, attention_weights), updates = theano.scan(
+        step, name=name + '_cond_gru_recurrent_scan',
+        sequences=sequences,
+        outputs_info=outputs,
+        non_sequences=non_sequences)
+    return h, context, attention_weights
 
 
 def lstm_recurrent_layer(list_of_inputs, mask, hidden_dim, graph, name,
@@ -527,8 +687,8 @@ def lstm_recurrent_layer(list_of_inputs, mask, hidden_dim, graph, name,
         # need to be *very* careful and test with strict=False and reusing stuff
         # since shape is redefined in if not names_in_graph...
         dim = shape[1]
-        if arr.ndim < 2:
-            return arr[n * dim:(n + 1) * dim]
+        if arr.ndim == 3:
+            return arr[:, :, n * dim:(n + 1) * dim]
         return arr[:, n * dim:(n + 1) * dim]
 
     def step(x_t, m_t, h_tm1, c_tm1, U):

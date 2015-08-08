@@ -1,6 +1,8 @@
 # Author: Kyle Kastner
 # License: BSD 3-clause
 from __future__ import print_function
+import __main__ as main
+import os
 import numpy as np
 import numbers
 import theano
@@ -14,6 +16,26 @@ except ImportError:
     import pickle
 from collections import defaultdict
 from functools import reduce
+from .plot_utils import _filled_js_template_from_epochs_dict
+
+
+def get_checkpoint_dir(checkpoint_dir=None, folder=None, create_dir=True):
+    """ Get checkpoint directory path """
+    if not checkpoint_dir:
+        checkpoint_dir = os.getenv("DAGBLDR_MODELS", os.path.join(
+            os.path.expanduser("~"), "dagbldr_models"))
+    if folder is None:
+        checkpoint_name = main.__file__.split(".")[0]
+        checkpoint_dir = os.path.join(checkpoint_dir, checkpoint_name)
+    else:
+        checkpoint_dir = os.path.join(checkpoint_dir, folder)
+    if not os.path.exists(checkpoint_dir) and create_dir:
+        os.makedirs(checkpoint_dir)
+    return checkpoint_dir
+
+
+def _in_nosetest():
+    return sys.argv[0].endswith('nosetests')
 
 
 def minibatch_indices(itr, minibatch_size):
@@ -166,7 +188,13 @@ def load_checkpoint(save_path):
     return items_dict
 
 
-def print_status_func(epoch_results):
+def write_epoch_results_as_html(epoch_results, save_path):
+    as_html = _filled_js_template_from_epochs_dict(epoch_results)
+    with open(save_path, "w") as f:
+        f.writelines(as_html)
+
+
+def monitor_status_func(epoch_results, append_name=None):
     """ Print the last results from a results dictionary """
     n_epochs_seen = max([len(l) for l in epoch_results.values()])
     last_results = {k: v[-1] for k, v in epoch_results.items()}
@@ -177,10 +205,18 @@ def print_status_func(epoch_results):
     print(epochline)
     print(breakline)
     pp.pprint(last_results)
+    save_path = os.path.join(get_checkpoint_dir(),
+                             "model_checkpoint_%i.html" % n_epochs_seen)
+    if append_name is not None:
+        split = save_path.split(".")
+        save_path = "".join(split[:-1] + ["_" + append_name + "_"] + split[-1])
+    if not _in_nosetest():
+        # Don't dump if testing!
+        write_epoch_results_as_html(epoch_results, save_path)
 
 
-def checkpoint_status_func(save_path, checkpoint_dict, epoch_results,
-                           nan_check=True):
+def checkpoint_status_func(checkpoint_dict, epoch_results,
+                           append_name=None, nan_check=True):
     """ Saves a checkpoint dict """
     checkpoint_dict["previous_epoch_results"] = epoch_results
     nan_test = [(k, True) for k, e_v in epoch_results.items()
@@ -189,12 +225,20 @@ def checkpoint_status_func(save_path, checkpoint_dict, epoch_results,
         nan_keys = set([tup[0] for tup in nan_test])
         raise ValueError("Found NaN values in the following keys ",
                          "%s, exiting training without saving" % nan_keys)
-    save_checkpoint(save_path, checkpoint_dict)
-    print_status_func(epoch_results)
+
+    n_epochs_seen = max([len(l) for l in epoch_results.values()])
+    save_path = os.path.join(get_checkpoint_dir(),
+                             "model_checkpoint_%i.pkl" % n_epochs_seen)
+    if append_name is not None:
+        split = save_path.split(".")
+        save_path = "".join(split[:-1] + ["_" + append_name + "_"] + split[-1])
+    if not _in_nosetest():
+        # Don't dump if testing!
+        save_checkpoint(save_path, checkpoint_dict)
+    monitor_status_func(epoch_results, append_name=append_name)
 
 
-def early_stopping_status_func(valid_cost, save_path, checkpoint_dict,
-                               epoch_results):
+def early_stopping_status_func(valid_cost, checkpoint_dict, epoch_results):
     """
     Adds valid_cost to epoch_results and saves model if best valid
     Assumes checkpoint_dict is a defaultdict(list)
@@ -219,9 +263,10 @@ def early_stopping_status_func(valid_cost, save_path, checkpoint_dict,
     new = min(epoch_results["valid_cost"])
     if new < old:
         print("Saving checkpoint based on validation score")
-        checkpoint_status_func(save_path, checkpoint_dict, epoch_results)
+        checkpoint_status_func(checkpoint_dict, epoch_results,
+                               append_name="best")
     else:
-        print_status_func(epoch_results)
+        monitor_status_func(epoch_results)
 
 
 def default_status_func(status_number, epoch_number, epoch_results):
@@ -240,7 +285,7 @@ def default_status_func(status_number, epoch_number, epoch_results):
     epoch_results
 
     """
-    print_status_func(epoch_results)
+    monitor_status_func(epoch_results)
 
 
 def even_slice(arr, size):

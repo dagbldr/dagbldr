@@ -1,0 +1,108 @@
+<html>
+<body>
+  <div id="container" style="height: 400px"></div>
+  <!--<script src="js/jquery-1.9.1.js" type="text/javascript"></script>
+  <script src="js/knockout-3.0.0.js" type="text/javascript"></script>
+  <script src="js/highcharts.js" type="text/javascript"></script>
+  <script src="js/exporting.js" type="text/javascript"></script>
+  <script src="http://code.jquery.com/jquery-1.9.1.js" type="text/javascript"></script>
+  <script src=http://ajax.aspnetcdn.com/ajax/knockout/knockout-3.1.0.js type="text/javascript"></script>
+  <script src="http://code.highcharts.com/highcharts.js" type="text/javascript"></script>
+  <script src="http://code.highcharts.com/modules/exporting.js" type="text/javascript"></script>
+   --!>
+  "IMPORTS_SPLIT"
+  <script>
+    $(function() {
+    var chart = chart = new Highcharts.Chart({
+        chart: {
+            renderTo: 'container',
+            type: 'line',
+            marginRight: 130,
+            marginBottom: 25
+        },
+
+        title: {
+            text: 'Model Statistics',
+            x: 0 //center
+        },
+        xAxis: {
+            title: {
+                text: 'Epochs'
+            },
+            allowDecimal: false,
+        },
+        yAxis: {
+            title: {
+                text: 'Values'
+            },
+            plotLines: [{
+                value: 0,
+                width: 1,
+                color: '#808080'}]
+        },
+        tooltip: {
+            formatter: function() {
+                return '<b>' + this.series.name + '</b><br/>' + this.x + ': ' + this.y;
+            }
+        },
+        legend: {
+            layout: 'vertical',
+            align: 'right',
+            verticalAlign: 'top',
+            x: -10,
+            y: 100,
+            borderWidth: 0
+        },
+        series: [
+        "DATA_SPLIT"
+        /*
+        Example of how the series should look
+        {
+            name: 'Time',
+            data: [185, 190, 185, 180]
+        },
+        {
+            name: 'Cost',
+            data: [195, 180, 182, 185]
+        },
+        {
+            name: 'Values',
+            data: [195, 190, 190, 185]
+        }
+        */
+        ]
+    });
+
+/*
+ * Monitor class
+ * containts monitoring data
+ */
+
+    function Monitor(x, y) {
+        var self = this;
+        self.x = ko.observable(x);
+        self.y = ko.observable(y);
+    }
+
+/*
+ * Channel class
+ * contains a monitor name and an array of values
+ */
+
+    function Channel(name, monitor) {
+        var self = this;
+        self.name = name;
+        self.monitorArray = ko.observableArray([]);
+    }
+    // Overall viewmodel for this screen, along with initial state
+    function monitorChannels() {
+        var self = this;
+        //editable data
+        self.monitors = ko.observableArray([]);
+        self.channels = ko.observableArray([]);
+    }
+    ko.applyBindings(new monitorChannels());
+});
+  </script>
+</body>
+</html>

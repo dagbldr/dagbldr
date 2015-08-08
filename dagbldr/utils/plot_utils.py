@@ -7,15 +7,58 @@ import subprocess
 from itertools import cycle
 
 
-def plot_training_epochs(epochs_dict, plot_name, plot_limit=None, turn_on_agg=True):
-    # plot_limit can be a positive integer, negative integer, or float between 0 and 1
-    # foat between 0 and 1 assumed to be percentage of total to keep
+def _get_js_path():
+    module_path = os.path.dirname(__file__)
+    js_path = os.path.join(module_path, "js_plot_dependencies")
+    return js_path
+
+
+def _filled_js_template_from_epochs_dict(epochs_dict):
+    js_path = _get_js_path()
+    template_path = os.path.join(js_path, "template.html")
+    f = open(template_path, mode='r')
+    all_template_lines = f.readlines()
+    f.close()
+    imports_split_index = [n for n, l in enumerate(all_template_lines)
+                           if "IMPORTS_SPLIT" in l][0]
+    data_split_index = [n for n, l in enumerate(all_template_lines)
+                        if "DATA_SPLIT" in l][0]
+    first_part = all_template_lines[:imports_split_index]
+    imports_part = []
+    js_files_path = os.path.join(js_path, "js")
+    js_file_names = ["jquery-1.9.1.js", "knockout-3.0.0.js",
+                     "highcharts.js", "exporting.js"]
+    js_files = [os.path.join(js_files_path, jsf) for jsf in js_file_names]
+    for js_file in js_files:
+        with open(js_file, "r") as f:
+            imports_part.extend(
+                ["<script>\n"] + f.readlines() + ["</script>\n"])
+    post_imports_part = all_template_lines[
+        imports_split_index + 1:data_split_index]
+    last_part = all_template_lines[data_split_index + 1:]
+
+    def gen_js_field_for_key_value(key, values):
+        assert type(values) is list
+        return "{\n    name: '%s',\n    data: %s\n},\n" % (
+            str(key), str(values))
+    data_part = [gen_js_field_for_key_value(k, v)
+                 for k, v in epochs_dict.items()]
+    all_filled_lines = first_part + imports_part + post_imports_part
+    all_filled_lines = all_filled_lines + data_part + last_part
+    return all_filled_lines
+
+
+def plot_training_epochs(epochs_dict, plot_name, plot_limit=None,
+                         turn_on_agg=True):
+    # plot_limit can be a positive integer, negative integer, or float in 0 - 1
+    # float between 0 and 1 assumed to be percentage of total to keep
     if turn_on_agg:
         import matplotlib
         matplotlib.use('Agg')
     import matplotlib.pyplot as plt
     # colors from seaborn flatui
-    color_list = ["#9b59b6", "#3498db", "#95a5a6", "#e74c3c", "#34495e", "#2ecc71"]
+    color_list = ["#9b59b6", "#3498db", "#95a5a6", "#e74c3c", "#34495e",
+                  "#2ecc71"]
     colors = cycle(color_list)
     for key in epochs_dict.keys():
         if plot_limit < 1 and plot_limit > 0:

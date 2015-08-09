@@ -29,8 +29,8 @@ n_chars = len(mapper.keys())
 text_minibatch_func = gen_text_minibatch_func(n_chars)
 X = [l[:-10] for l in cleaned]
 y = [l[-10:] for l in cleaned]
-X_mb, X_mask = text_minibatch_func(X, 0, minibatch_size)
-y_mb, y_mask = text_minibatch_func(y, 0, minibatch_size)
+X_mb, X_mask = text_minibatch_func(X, slice(0, minibatch_size))
+y_mb, y_mask = text_minibatch_func(y, slice(0, minibatch_size))
 
 
 def test_conditional_gru_recurrent():
@@ -94,6 +94,16 @@ def test_conditional_attention_gru_recurrent():
 
     h = bidirectional_gru_recurrent_layer([X_sym], X_mask_sym, n_hid, graph,
                                           'l1_end', random_state)
+
+    """
+    fit_function = theano.function([X_sym, X_mask_sym, y_sym, y_mask_sym],
+                                   [h], mode="FAST_COMPILE",
+                                   on_unused_input="ignore")
+
+    iterate_function(fit_function, [X, y], minibatch_size,
+                     list_of_minibatch_functions=[text_minibatch_func],
+                     list_of_output_names=["cost"], n_epochs=1)
+    """
 
     shifted_y_sym = shift_layer([y_sym], graph, 'shift')
 

@@ -38,35 +38,6 @@ def _in_nosetest():
     return sys.argv[0].endswith('nosetests')
 
 
-def minibatch_indices(itr, minibatch_size):
-    """ Generate indices for slicing 2D and 3D arrays in minibatches"""
-    is_three_d = False
-    if type(itr) is np.ndarray:
-        if len(itr.shape) == 3:
-            is_three_d = True
-    elif not isinstance(itr[0], numbers.Real):
-        # Assume 3D list of list of list
-        # iterable of iterable of iterable, feature dim must be consistent
-        is_three_d = True
-
-    if is_three_d:
-        if type(itr) is np.ndarray:
-            minibatch_indices = np.arange(0, itr.shape[1], minibatch_size)
-        else:
-            # multi-list
-            minibatch_indices = np.arange(0, len(itr), minibatch_size)
-        minibatch_indices = np.asarray(list(minibatch_indices) + [len(itr)])
-        start_indices = minibatch_indices[:-1]
-        end_indices = minibatch_indices[1:]
-        return list(zip(start_indices, end_indices))
-    else:
-        minibatch_indices = np.arange(0, len(itr), minibatch_size)
-        minibatch_indices = np.asarray(list(minibatch_indices) + [len(itr)])
-        start_indices = minibatch_indices[:-1]
-        end_indices = minibatch_indices[1:]
-        return list(zip(start_indices, end_indices))
-
-
 def make_character_level_from_text(text):
     """ Create mapping and inverse mappings for text -> one_hot_char
 
@@ -174,7 +145,7 @@ def save_checkpoint(save_path, items_dict):
     old_recursion_limit = sys.getrecursionlimit()
     sys.setrecursionlimit(40000)
     with open(save_path, mode="wb") as f:
-        pickle.dump(items_dict, f)
+        pickle.dump(items_dict, f, protocol=-1)
     sys.setrecursionlimit(old_recursion_limit)
 
 
@@ -210,7 +181,7 @@ def monitor_status_func(epoch_results, append_name=None):
     if append_name is not None:
         split = save_path.split(".")
         save_path = "".join(split[:-1] + ["_" + append_name + "_"] + split[-1])
-    if not _in_nosetest():
+    if not  _in_nosetest():
         # Don't dump if testing!
         write_epoch_results_as_html(epoch_results, save_path)
 
@@ -228,7 +199,7 @@ def checkpoint_status_func(checkpoint_dict, epoch_results,
 
     n_epochs_seen = max([len(l) for l in epoch_results.values()])
     save_path = os.path.join(get_checkpoint_dir(),
-                             "model_checkpoint_%i.pkl" % n_epochs_seen)
+                            "model_checkpoint_%i.pkl" % n_epochs_seen)
     if append_name is not None:
         split = save_path.split(".")
         save_path = "".join(split[:-1] + ["_" + append_name + "_"] + split[-1])
@@ -296,15 +267,18 @@ def even_slice(arr, size):
     return arr[:extent]
 
 
-def make_minibatch(arg, start, stop):
+def make_minibatch(arg, slice_or_indices_list):
     """ Does not handle off-size minibatches
+        returns list of [arg, mask] mask of ones if 3D
+        else [arg]
 
-        Returns list of single element for API compat with mask generators
     """
     if len(arg.shape) == 3:
-        return [arg[:, start:stop]]
+        sliced = arg[:, slice_or_indices_list, :]
+        return [sliced, np.ones_like(sliced[:, :, 0].astype(
+            theano.config.floatX))]
     else:
-        return [arg[start:stop]]
+        return [arg[slice_or_indices_list, :]]
 
 
 def gen_text_minibatch_func(one_hot_size):
@@ -322,8 +296,11 @@ def gen_text_minibatch_func(one_hot_size):
         list_of_minibatch_functions=[text_minibatcher], n_epochs=1,
         shuffle=False)
     """
-    def apply(arg, start, stop):
-        sli = arg[start:stop]
+    def apply(arg, slice_type):
+        if type(slice_type) is not slice:
+            raise ValueError("Text formatters for list of list can only use "
+                             "slice objects")
+        sli = arg[slice_type]
         expanded = convert_to_one_hot(sli, one_hot_size)
         lengths = [len(s) for s in sli]
         mask = np.zeros((max(lengths), len(sli)), dtype=theano.config.floatX)
@@ -334,14 +311,14 @@ def gen_text_minibatch_func(one_hot_size):
 
 
 def iterate_function(func, list_of_minibatch_args, minibatch_size,
-                     list_of_non_minibatch_args=None,
+                     indices=None, list_of_non_minibatch_args=None,
                      list_of_minibatch_functions=[make_minibatch],
                      list_of_preprocessing_functions=None,
                      list_of_output_names=None,
-                     n_epochs=1000,
-                     n_epoch_status=.02,
+                     n_epochs=100,
+                     n_epoch_status=1,
                      epoch_status_func=default_status_func,
-                     n_minibatch_status=.02,
+                     n_minibatch_status=.1,
                      previous_epoch_results=None,
                      shuffle=False, random_state=None):
     """
@@ -397,6 +374,7 @@ def iterate_function(func, list_of_minibatch_args, minibatch_size,
         epoch_results = defaultdict(list)
     else:
         epoch_results = previous_epoch_results
+
     # Input checking and setup
     if shuffle:
         assert random_state is not None
@@ -404,10 +382,35 @@ def iterate_function(func, list_of_minibatch_args, minibatch_size,
     for arg in list_of_minibatch_args:
         assert len(arg) == len(list_of_minibatch_args[0])
 
-    indices = minibatch_indices(list_of_minibatch_args[0], minibatch_size)
-    if len(list_of_minibatch_args[0]) % minibatch_size != 0:
-        warnings.warn("Length of dataset should be evenly divisible by "
-                      "minibatch_size.", UserWarning)
+    if indices is None:
+        # check if 2D or 3D
+        try:
+            shape = list_of_minibatch_args[0].shape
+            if len(shape) == 2:
+                n_samples = shape[0]
+            elif len(shape) == 3:
+                n_samples = shape[1]
+            else:
+                raise ValueError("Unsupported dimensions for input")
+        except AttributeError:
+            n_samples = len(list_of_minibatch_args[0])
+        indices = np.arange(0, n_samples)
+
+    if len(indices) % minibatch_size != 0:
+        warnings.warn("WARNING:Length of dataset should be evenly divisible by "
+                      "minibatch_size - slicing to match.", UserWarning)
+        indices = even_slice(indices,
+                             len(indices) - len(indices) % minibatch_size)
+        assert(len(indices) % minibatch_size == 0)
+    minibatch_indices = [indices[i:i + minibatch_size]
+                         for i in np.arange(0, len(indices), minibatch_size)]
+    # Check for contiguous chunks to avoid unnecessary copies
+    minibatch_indices = [slice(mi[0], mi[-1] + 1, 1)
+                         if np.all(np.abs(np.array(mi) -
+                                          np.arange(mi[0], mi[-1] + 1, 1))
+                                   < 1E-8)
+                         else mi
+                         for mi in minibatch_indices]
 
     if n_epoch_status <= 0:
         raise ValueError("n_epoch_status must be > 0")
@@ -422,10 +425,10 @@ def iterate_function(func, list_of_minibatch_args, minibatch_size,
     if n_minibatch_status <= 0:
         raise ValueError("n_minibatch_status must be > 0")
     elif n_minibatch_status < 1:
-        n_minibatch_status = int(n_minibatch_status * len(indices))
+        n_minibatch_status = int(n_minibatch_status * len(minibatch_indices))
         if n_minibatch_status < 1:
             # fall back to 1 update
-            n_minibatch_status = len(indices)
+            n_minibatch_status = len(minibatch_indices)
     assert n_minibatch_status > 0
 
     status_points = list(range(n_epochs))
@@ -457,17 +460,17 @@ def iterate_function(func, list_of_minibatch_args, minibatch_size,
         epoch_start = time.time()
         results = defaultdict(list)
         if shuffle:
-            random_state.shuffle(indices)
-        for minibatch_count, (i, j) in enumerate(indices):
+            random_state.shuffle(minibatch_indices)
+        for minibatch_count, mi in enumerate(minibatch_indices):
             minibatch_args = []
             for n, arg in enumerate(list_of_minibatch_args):
                 if list_of_preprocessing_functions is not None:
                     minibatch_args += [list_of_preprocessing_functions[n](
-                        *list_of_minibatch_functions[n](arg, i, j))]
+                        *list_of_minibatch_functions[n](arg, mi))]
                 else:
                     # list of minibatch_functions can't always be the right size
                     # (enc-dec with mask coming from mb func)
-                    minibatch_args += list_of_minibatch_functions[n](arg, i, j)
+                    minibatch_args += list_of_minibatch_functions[n](arg, mi)
             if list_of_non_minibatch_args is not None:
                 all_args = minibatch_args + list_of_non_minibatch_args
             else:
@@ -483,7 +486,8 @@ def iterate_function(func, list_of_minibatch_args, minibatch_size,
                 else:
                     results[n].append(minibatch_results[n])
             if minibatch_count % n_minibatch_status == 0:
-                print("minibatch %i/%i" % (minibatch_count, len(indices) - 1))
+                print("minibatch %i/%i" % (minibatch_count,
+                                           len(minibatch_indices) - 1))
         epoch_stop = time.time()
         output = {r: np.mean(results[r]) for r in results.keys()}
         output["mean_minibatch_time_s"] = (epoch_stop - epoch_start) / float(

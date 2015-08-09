@@ -17,7 +17,7 @@
         chart: {
             renderTo: 'container',
             type: 'line',
-            marginRight: 130,
+            marginRight: 200,
             marginBottom: 25
         },
 
@@ -49,9 +49,24 @@
             layout: 'vertical',
             align: 'right',
             verticalAlign: 'top',
-            x: -10,
-            y: 100,
-            borderWidth: 0
+            floating: true,
+            x: 40,
+            y: 0,
+            itemWidth: 200,
+            labelFormatter: function() {
+                var words = this.name.split(/[_]+/);
+                var numWordsPerLine = 3;
+                var str = [];
+
+                for (var word in words) {
+                    if (word > 0 && word % numWordsPerLine == 0)
+                        str.push('<br>');
+
+                    str.push(words[word]);
+                }
+
+                return str.join('_');
+            }
         },
         series: [
         "DATA_SPLIT"

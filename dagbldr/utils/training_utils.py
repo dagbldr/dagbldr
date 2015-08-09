@@ -550,3 +550,45 @@ def iterate_function(func, list_of_minibatch_args, minibatch_size,
                 status_number = np.searchsorted(status_points, e)
                 epoch_status_func(status_number, epoch_number, epoch_results)
     return epoch_results
+
+
+def early_stopping_trainer(fit_function, cost_function,
+                           checkpoint_dict,
+                           list_of_minibatch_args,
+                           minibatch_size, train_indices, valid_indices,
+                           list_of_minibatch_functions=[make_minibatch],
+                           fit_function_output_names=None,
+                           cost_function_output_name=None,
+                           list_of_non_minibatch_args=None,
+                           list_of_preprocessing_functions=None,
+                           n_epochs=100, n_epoch_status=1,
+                           n_minibatch_status=.1, previous_epoch_results=None,
+                           shuffle=False, random_state=None):
+    """
+    cost_function should have 1 output
+    cost_function_output_name sthould be a string
+    fit_function can be any fit function
+    fit_function_names should be a list of names to map to fit_function outputs
+    """
+    def status_func(status_number, epoch_number, epoch_results):
+        valid_results = iterate_function(
+            cost_function, list_of_minibatch_args,
+            minibatch_size,
+            list_of_non_minibatch_args=list_of_non_minibatch_args,
+            indices=valid_indices,
+            epoch_status_func=None,
+            list_of_minibatch_functions=list_of_minibatch_functions,
+            list_of_output_names=[cost_function_output_name], n_epochs=1)
+        early_stopping_status_func(
+            valid_results[cost_function_output_name][-1],
+            checkpoint_dict, epoch_results)
+
+    epoch_results = iterate_function(
+        fit_function, list_of_minibatch_args, minibatch_size,
+        indices=train_indices,
+        list_of_minibatch_functions=list_of_minibatch_functions,
+        list_of_output_names=fit_function_output_names,
+        previous_epoch_results=previous_epoch_results,
+        epoch_status_func=status_func, n_epoch_status=n_epoch_status,
+        n_epochs=n_epochs)
+    return epoch_results

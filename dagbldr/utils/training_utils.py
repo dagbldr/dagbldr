@@ -4,6 +4,7 @@ from __future__ import print_function
 import __main__ as main
 import os
 import numpy as np
+import glob
 import numbers
 import theano
 import sys
@@ -159,8 +160,25 @@ def load_checkpoint(save_path):
     return items_dict
 
 
-def write_epoch_results_as_html(epoch_results, save_path):
-    as_html = _filled_js_template_from_epochs_dict(epoch_results)
+def load_last_checkpoint(append_name=None):
+    """ Simple pickle wrapper for checkpoint dictionaries """
+    save_paths = glob.glob(os.path.join(get_checkpoint_dir(), "*.pkl"))
+    if len(save_paths) == 0:
+        # No saved checkpoint, return empty dict
+        return {}
+    if append_name is not None:
+        save_paths = [s.split(append_name)[:-1] + s.split(append_name)[-1:]
+                      for s in save_paths]
+    sorted_paths = sorted(save_paths,
+                          key=lambda x: int(x.split(".")[0].split("_")[-1]))
+    last_checkpoint_path = sorted_paths[-1]
+    print("Loading checkpoint from %s" % last_checkpoint_path)
+    return load_checkpoint(last_checkpoint_path)
+
+
+def write_epoch_results_as_html(epoch_results, save_path, default_show="all"):
+    as_html = _filled_js_template_from_epochs_dict(
+        epoch_results, default_show=default_show)
     with open(save_path, "w") as f:
         f.writelines(as_html)
 
@@ -179,11 +197,16 @@ def monitor_status_func(epoch_results, append_name=None):
     save_path = os.path.join(get_checkpoint_dir(),
                              "model_checkpoint_%i.html" % n_epochs_seen)
     if append_name is not None:
-        split = save_path.split(".")
-        save_path = "".join(split[:-1] + ["_" + append_name + "_"] + split[-1])
-    if not  _in_nosetest():
+        split = save_path.split("_")
+        save_path = "_".join(
+            split[:-1] + [append_name] + split[-1:])
+    if not _in_nosetest():
         # Don't dump if testing!
-        write_epoch_results_as_html(epoch_results, save_path)
+        # Only enable user defined keys
+        show_keys = [k for k in epoch_results.keys()
+                     if "_auto" not in k]
+        write_epoch_results_as_html(epoch_results, save_path,
+                                    default_show=show_keys)
 
 
 def checkpoint_status_func(checkpoint_dict, epoch_results,
@@ -199,10 +222,11 @@ def checkpoint_status_func(checkpoint_dict, epoch_results,
 
     n_epochs_seen = max([len(l) for l in epoch_results.values()])
     save_path = os.path.join(get_checkpoint_dir(),
-                            "model_checkpoint_%i.pkl" % n_epochs_seen)
+                             "model_checkpoint_%i.pkl" % n_epochs_seen)
     if append_name is not None:
-        split = save_path.split(".")
-        save_path = "".join(split[:-1] + ["_" + append_name + "_"] + split[-1])
+        split = save_path.split("_")
+        save_path = "_".join(
+            split[:-1] + [append_name] + split[-1:])
     if not _in_nosetest():
         # Don't dump if testing!
         save_checkpoint(save_path, checkpoint_dict)
@@ -237,7 +261,7 @@ def early_stopping_status_func(valid_cost, checkpoint_dict, epoch_results):
         checkpoint_status_func(checkpoint_dict, epoch_results,
                                append_name="best")
     else:
-        monitor_status_func(epoch_results)
+        checkpoint_status_func(checkpoint_dict, epoch_results)
 
 
 def default_status_func(status_number, epoch_number, epoch_results):
@@ -490,14 +514,34 @@ def iterate_function(func, list_of_minibatch_args, minibatch_size,
                                            len(minibatch_indices) - 1))
         epoch_stop = time.time()
         output = {r: np.mean(results[r]) for r in results.keys()}
-        output["mean_minibatch_time_s"] = (epoch_stop - epoch_start) / float(
-            minibatch_count + 1)
-        output["mean_sample_time_s"] = (epoch_stop - epoch_start) / float(
+        output["minibatch_size_auto"] = minibatch_size
+        output["minibatch_count_auto"] = len(minibatch_indices)
+        output["start_time_s_auto"] = global_start
+        output["number_of_samples_auto"] = len(
+            minibatch_indices) * minibatch_size
+
+        if len(epoch_results.keys()) != 0:
+            last_training_time = epoch_results["total_training_time_s_auto"][-1]
+            last_update_count = epoch_results[
+                "total_number_of_updates_auto"][-1]
+            last_epoch_count = epoch_results["total_number_of_epochs_auto"][-1]
+        else:
+            last_training_time = 0
+            last_update_count = 0
+            last_epoch_count = 0
+
+        output["mean_minibatch_time_s_auto"] = (
+            epoch_stop - epoch_start) / float(minibatch_count + 1)
+        output["mean_sample_time_s_auto"] = (epoch_stop - epoch_start) / float(
             len(list_of_minibatch_args[0]) * (minibatch_count + 1))
-        output["this_epoch_time_s"] = epoch_stop - epoch_start
-        output["mean_epoch_time_s"] = (epoch_stop - global_start) / float(e + 1)
-        output["total_training_time_s"] = epoch_stop - global_start
-        output["total_number_of_updates"] = (e + 1) * (minibatch_count + 1)
+        output["mean_epoch_time_s_auto"] = (
+            epoch_stop - global_start) / float(e + 1)
+        output["this_epoch_time_s_auto"] = epoch_stop - epoch_start
+        output["total_training_time_s_auto"] = (
+            epoch_stop - global_start) + last_training_time
+        output["total_number_of_updates_auto"] = (
+            e + 1) * (minibatch_count + 1) + last_update_count
+        output["total_number_of_epochs_auto"] = e + 1 + last_epoch_count
         for k in output.keys():
             epoch_results[k].append(output[k])
         if e in status_points:

@@ -13,7 +13,9 @@ def _get_js_path():
     return js_path
 
 
-def _filled_js_template_from_epochs_dict(epochs_dict):
+def _filled_js_template_from_epochs_dict(epochs_dict, default_show="all"):
+    # Uses arbiter strings in the template to split the template and stick
+    # values in
     js_path = _get_js_path()
     template_path = os.path.join(js_path, "template.html")
     f = open(template_path, mode='r')
@@ -37,12 +39,15 @@ def _filled_js_template_from_epochs_dict(epochs_dict):
         imports_split_index + 1:data_split_index]
     last_part = all_template_lines[data_split_index + 1:]
 
-    def gen_js_field_for_key_value(key, values):
+    def gen_js_field_for_key_value(key, values, show=True):
         assert type(values) is list
-        return "{\n    name: '%s',\n    data: %s\n},\n" % (
-            str(key), str(values))
-    data_part = [gen_js_field_for_key_value(k, v)
-                 for k, v in epochs_dict.items()]
+        show_key = "true" if show else "false"
+        return "{\n    name: '%s',\n    data: %s,\n    visible: %s\n},\n" % (
+            str(key), str(values), show_key)
+    data_part = [gen_js_field_for_key_value(k, epochs_dict[k], True)
+                 if k in default_show or default_show == "all"
+                 else gen_js_field_for_key_value(k, epochs_dict[k], False)
+                 for k in sorted(epochs_dict.keys())]
     all_filled_lines = first_part + imports_part + post_imports_part
     all_filled_lines = all_filled_lines + data_part + last_part
     return all_filled_lines
@@ -62,7 +67,7 @@ def plot_training_epochs(epochs_dict, plot_name, plot_limit=None,
     colors = cycle(color_list)
     for key in epochs_dict.keys():
         if plot_limit < 1 and plot_limit > 0:
-           plot_limit = int(plot_limit * len(epochs_dict[key]))
+            plot_limit = int(plot_limit * len(epochs_dict[key]))
         plt.plot(epochs_dict[key][:plot_limit], color=colors.next())
         plt.title(str(key))
         plt.savefig(plot_name + "_" + str(key) + ".png")
@@ -86,7 +91,8 @@ def plot_images_as_subplots(list_of_plot_args, plot_name, width, height,
         f, axarr = plt.subplots(lengths[0], len(lengths), figsize=figsize)
     for n, v in enumerate(list_of_plot_args):
         for i, X_i in enumerate(v):
-            axarr[i, n].matshow(X_i.reshape(width, height), cmap="gray", interpolation="none")
+            axarr[i, n].matshow(X_i.reshape(width, height), cmap="gray",
+                                interpolation="none")
             axarr[i, n].axis('off')
             if invert_y:
                 axarr[i, n].set_ylim(axarr[i, n].get_ylim()[::-1])
@@ -96,11 +102,10 @@ def plot_images_as_subplots(list_of_plot_args, plot_name, width, height,
     plt.savefig(plot_name + ".png")
 
 
-def make_gif(arr, gif_name, plot_width, plot_height, resize_scale_width=5, resize_scale_height=5,
-             list_text_per_frame=None, invert_y=False, invert_x=False,
-             list_text_per_frame_color=None,
-             delay=1, grayscale=False,
-             loop=False, turn_on_agg=True):
+def make_gif(arr, gif_name, plot_width, plot_height, resize_scale_width=5,
+             resize_scale_height=5, list_text_per_frame=None, invert_y=False,
+             invert_x=False, list_text_per_frame_color=None, delay=1,
+             grayscale=False, loop=False, turn_on_agg=True):
     """ Make a gif from a series of pngs using matplotlib matshow """
     if turn_on_agg:
         import matplotlib
@@ -111,7 +116,8 @@ def make_gif(arr, gif_name, plot_width, plot_height, resize_scale_width=5, resiz
     random_code = random.randrange(2 ** 32)
     pre = str(random_code)
     for n, arr_i in enumerate(arr):
-        plt.matshow(arr_i.reshape(plot_width, plot_height), cmap="gray", interpolation="none")
+        plt.matshow(arr_i.reshape(plot_width, plot_height), cmap="gray",
+                    interpolation="none")
         if invert_y:
             ax = plt.gca()
             ax.set_ylim(ax.get_ylim()[::-1])

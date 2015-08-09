@@ -19,6 +19,9 @@ from collections import defaultdict
 from functools import reduce
 from .plot_utils import _filled_js_template_from_epochs_dict
 
+# TODO: Fetch from env
+NUM_SAVED_TO_KEEP = 5
+
 
 def get_checkpoint_dir(checkpoint_dir=None, folder=None, create_dir=True):
     """ Get checkpoint directory path """
@@ -183,6 +186,38 @@ def write_epoch_results_as_html(epoch_results, save_path, default_show="all"):
         f.writelines(as_html)
 
 
+def _get_file_matches(glob_ext, append_name):
+    n_saved_to_keep = NUM_SAVED_TO_KEEP
+    all_files = glob.glob(
+        os.path.join(get_checkpoint_dir(), glob_ext))
+    if append_name is None:
+        selected = [f for n, f in enumerate(all_files)
+                    if len(f.split(os.sep)[-1].split("_")) == 3]
+    else:
+        selected = [f for n, f in enumerate(all_files)
+                    if append_name in f.split(os.sep)[-1]]
+    selected = sorted(selected, key=lambda x: int(x.split(
+        os.sep)[-1].split(".")[0].split("_")[-1]))
+    return selected
+
+
+def _remove_old_files(sorted_files_list):
+    n_saved_to_keep = NUM_SAVED_TO_KEEP
+    if len(sorted_files_list) > n_saved_to_keep:
+        for f in sorted_files_list[:-n_saved_to_keep]:
+            os.remove(f)
+
+
+def cleanup_monitors(append_name=None):
+    selected_monitors = _get_file_matches("*.html", append_name)
+    _remove_old_files(selected_monitors)
+
+
+def cleanup_checkpoints(append_name=None):
+    selected_checkpoints = _get_file_matches("*.pkl", append_name)
+    _remove_old_files(selected_checkpoints)
+
+
 def monitor_status_func(epoch_results, append_name=None):
     """ Print the last results from a results dictionary """
     n_epochs_seen = max([len(l) for l in epoch_results.values()])
@@ -207,6 +242,7 @@ def monitor_status_func(epoch_results, append_name=None):
                      if "_auto" not in k]
         write_epoch_results_as_html(epoch_results, save_path,
                                     default_show=show_keys)
+        cleanup_monitors(append_name)
 
 
 def checkpoint_status_func(checkpoint_dict, epoch_results,
@@ -230,6 +266,7 @@ def checkpoint_status_func(checkpoint_dict, epoch_results,
     if not _in_nosetest():
         # Don't dump if testing!
         save_checkpoint(save_path, checkpoint_dict)
+        cleanup_checkpoints(append_name)
     monitor_status_func(epoch_results, append_name=append_name)
 
 
@@ -480,6 +517,15 @@ def iterate_function(func, list_of_minibatch_args, minibatch_size,
 
     # Function loop
     global_start = time.time()
+    if len(epoch_results.keys()) != 0:
+        last_training_time = epoch_results["total_training_time_s_auto"][-1]
+        last_update_count = epoch_results[
+            "total_number_of_updates_auto"][-1]
+        last_epoch_count = epoch_results["total_number_of_epochs_auto"][-1]
+    else:
+        last_training_time = 0
+        last_update_count = 0
+        last_epoch_count = 0
     for e in range(n_epochs):
         epoch_start = time.time()
         results = defaultdict(list)
@@ -519,17 +565,6 @@ def iterate_function(func, list_of_minibatch_args, minibatch_size,
         output["start_time_s_auto"] = global_start
         output["number_of_samples_auto"] = len(
             minibatch_indices) * minibatch_size
-
-        if len(epoch_results.keys()) != 0:
-            last_training_time = epoch_results["total_training_time_s_auto"][-1]
-            last_update_count = epoch_results[
-                "total_number_of_updates_auto"][-1]
-            last_epoch_count = epoch_results["total_number_of_epochs_auto"][-1]
-        else:
-            last_training_time = 0
-            last_update_count = 0
-            last_epoch_count = 0
-
         output["mean_minibatch_time_s_auto"] = (
             epoch_stop - epoch_start) / float(minibatch_count + 1)
         output["mean_sample_time_s_auto"] = (epoch_stop - epoch_start) / float(

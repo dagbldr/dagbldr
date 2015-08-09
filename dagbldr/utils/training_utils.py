@@ -270,7 +270,8 @@ def checkpoint_status_func(checkpoint_dict, epoch_results,
     monitor_status_func(epoch_results, append_name=append_name)
 
 
-def early_stopping_status_func(valid_cost, checkpoint_dict, epoch_results):
+def early_stopping_status_func(valid_cost, valid_cost_name, checkpoint_dict,
+                               epoch_results):
     """
     Adds valid_cost to epoch_results and saves model if best valid
     Assumes checkpoint_dict is a defaultdict(list)
@@ -290,9 +291,9 @@ def early_stopping_status_func(valid_cost, checkpoint_dict, epoch_results):
     stopping.
     """
     # Quick trick to avoid 0 length list
-    old = min(epoch_results["valid_cost"] + [np.inf])
-    epoch_results["valid_cost"].append(valid_cost)
-    new = min(epoch_results["valid_cost"])
+    old = min(epoch_results[valid_cost_name] + [np.inf])
+    epoch_results[valid_cost_name].append(valid_cost)
+    new = min(epoch_results[valid_cost_name])
     if new < old:
         print("Saving checkpoint based on validation score")
         checkpoint_status_func(checkpoint_dict, epoch_results,
@@ -616,6 +617,7 @@ def early_stopping_trainer(fit_function, cost_function,
             list_of_output_names=[cost_function_output_name], n_epochs=1)
         early_stopping_status_func(
             valid_results[cost_function_output_name][-1],
+            cost_function_output_name,
             checkpoint_dict, epoch_results)
 
     epoch_results = iterate_function(

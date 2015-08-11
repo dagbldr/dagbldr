@@ -45,7 +45,7 @@ def np_ortho(shape, random_state):
 
 
 def softplus(X):
-    return tensor.nnet.softplus(X)
+    return tensor.nnet.softplus(X) + 1E-4
 
 
 def relu(X):

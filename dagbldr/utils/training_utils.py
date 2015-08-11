@@ -187,7 +187,6 @@ def write_epoch_results_as_html(epoch_results, save_path, default_show="all"):
 
 
 def _get_file_matches(glob_ext, append_name):
-    n_saved_to_keep = NUM_SAVED_TO_KEEP
     all_files = glob.glob(
         os.path.join(get_checkpoint_dir(), glob_ext))
     if append_name is None:
@@ -457,6 +456,9 @@ def iterate_function(func, list_of_minibatch_args, minibatch_size,
         except AttributeError:
             n_samples = len(list_of_minibatch_args[0])
         indices = np.arange(0, n_samples)
+
+    # Bad things happen if this is out of bounds
+    assert indices[-1] < len(list_of_minibatch_args[0])
 
     if len(indices) % minibatch_size != 0:
         warnings.warn("WARNING:Length of dataset should be evenly divisible by "

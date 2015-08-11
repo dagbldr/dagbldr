@@ -2,6 +2,7 @@
 # License: BSD 3-clause
 import numpy as np
 from theano import tensor
+import theano
 from ..utils import concatenate
 
 
@@ -47,7 +48,7 @@ def binary_entropy(values):
     return (-values * tensor.log(values)).sum(axis=-1)
 
 
-def categorical_crossentropy(predicted_values, true_values, eps=1E-6):
+def categorical_crossentropy(predicted_values, true_values, eps=0.):
     """
     Multinomial negative log likelihood of predicted compared to one hot
     true_values
@@ -75,14 +76,16 @@ def categorical_crossentropy(predicted_values, true_values, eps=1E-6):
     indices = tensor.argmax(true_values, axis=-1)
     rows = tensor.arange(true_values.shape[0])
     if predicted_values.ndim < 3:
-        return -tensor.log(predicted_values + eps)[rows, indices]
+        return -tensor.log(tensor.cast(predicted_values + eps,
+                                       theano.config.floatX))[rows, indices]
     elif predicted_values.ndim == 3:
         d0 = true_values.shape[0]
         d1 = true_values.shape[1]
         pred = predicted_values.reshape((d0 * d1, -1))
         ind = indices.reshape((d0 * d1,))
         s = tensor.arange(pred.shape[0])
-        correct = -tensor.log(pred + eps)[s, ind]
+        correct = -tensor.log(tensor.cast(pred + eps,
+                                          theano.config.floatX))[s, ind]
         return correct.reshape((d0, d1,))
     else:
         raise AttributeError("Tensor dim not supported")

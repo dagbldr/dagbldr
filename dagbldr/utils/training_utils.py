@@ -3,6 +3,7 @@
 from __future__ import print_function
 import __main__ as main
 import os
+import decimal
 import numpy as np
 import glob
 import numbers
@@ -17,7 +18,7 @@ except ImportError:
     import pickle
 from collections import defaultdict
 from functools import reduce
-from .plot_utils import _filled_js_template_from_epochs_dict
+from .plot_utils import _filled_js_template_from_results_dict
 
 # TODO: Fetch from env
 NUM_SAVED_TO_KEEP = 5
@@ -179,9 +180,9 @@ def load_last_checkpoint(append_name=None):
     return load_checkpoint(last_checkpoint_path)
 
 
-def write_epoch_results_as_html(epoch_results, save_path, default_show="all"):
-    as_html = _filled_js_template_from_epochs_dict(
-        epoch_results, default_show=default_show)
+def write_results_as_html(results_dict, save_path, default_show="all"):
+    as_html = _filled_js_template_from_results_dict(
+        results_dict, default_show=default_show)
     with open(save_path, "w") as f:
         f.writelines(as_html)
 
@@ -190,6 +191,7 @@ def _get_file_matches(glob_ext, append_name):
     all_files = glob.glob(
         os.path.join(get_checkpoint_dir(), glob_ext))
     if append_name is None:
+        # This 3 is definitely brittle - need better checks
         selected = [f for n, f in enumerate(all_files)
                     if len(f.split(os.sep)[-1].split("_")) == 3]
     else:
@@ -207,8 +209,9 @@ def _remove_old_files(sorted_files_list):
             os.remove(f)
 
 
-def cleanup_monitors(append_name=None):
-    selected_monitors = _get_file_matches("*.html", append_name)
+def cleanup_monitors(partial_match, append_name=None):
+    selected_monitors = _get_file_matches(
+        "*" + partial_match + "*.html", append_name)
     _remove_old_files(selected_monitors)
 
 
@@ -217,19 +220,38 @@ def cleanup_checkpoints(append_name=None):
     _remove_old_files(selected_checkpoints)
 
 
-def monitor_status_func(epoch_results, append_name=None):
+def monitor_status_func(results_dict, append_name=None, status_type="epoch",
+                        nan_check=True):
     """ Print the last results from a results dictionary """
-    n_epochs_seen = max([len(l) for l in epoch_results.values()])
-    last_results = {k: v[-1] for k, v in epoch_results.items()}
+    n_seen = max([len(l) for l in results_dict.values()])
+    last_results = {k: v[-1] for k, v in results_dict.items()}
+    # This really, really assumes a 1D numpy array (1,) or (1, 1)
+    last_results = {k: float("%.15f" % v.ravel()[-1])
+                    if isinstance(v, (np.generic, np.ndarray))
+                    else float("%.15f" % v)
+                    for k, v in last_results.items()}
     pp = pprint.PrettyPrinter()
-    epochline = "Epoch %i" % n_epochs_seen
-    breakline = "".join(["-"] * (len(epochline) + 1))
+    filename = main.__file__
+    fileline = "Script %s" % str(filename)
+    if status_type == "epoch":
+        statusline = "Epoch %i" % n_seen
+    elif status_type == "update":
+        statusline = "Update %i" % n_seen
+    else:
+        raise ValueError("Unknown status_type %s" % status_type)
+    breakline = "".join(["-"] * (len(statusline) + 1))
     print(breakline)
-    print(epochline)
+    print(fileline)
+    print(statusline)
     print(breakline)
     pp.pprint(last_results)
-    save_path = os.path.join(get_checkpoint_dir(),
-                             "model_checkpoint_%i.html" % n_epochs_seen)
+    if status_type == "epoch":
+        save_path = os.path.join(get_checkpoint_dir(),
+                                "model_checkpoint_%i.html" % n_seen)
+    elif status_type =="update":
+        save_path = os.path.join(get_checkpoint_dir(),
+                                "model_update_%i.html" % n_seen)
+
     if append_name is not None:
         split = save_path.split("_")
         save_path = "_".join(
@@ -237,11 +259,20 @@ def monitor_status_func(epoch_results, append_name=None):
     if not _in_nosetest():
         # Don't dump if testing!
         # Only enable user defined keys
-        show_keys = [k for k in epoch_results.keys()
+        nan_test = [(k, True) for k, r_v in results_dict.items()
+                    for v in r_v if np.isnan(v)]
+        if nan_check and len(nan_test) > 0:
+            nan_keys = set([tup[0] for tup in nan_test])
+            raise ValueError("Found NaN values in the following keys ",
+                            "%s, exiting training" % nan_keys)
+        show_keys = [k for k in results_dict.keys()
                      if "_auto" not in k]
-        write_epoch_results_as_html(epoch_results, save_path,
-                                    default_show=show_keys)
-        cleanup_monitors(append_name)
+        write_results_as_html(results_dict, save_path,
+                              default_show=show_keys)
+        if status_type == "epoch":
+            cleanup_monitors("checkpoint", append_name)
+        elif status_type == "update":
+            cleanup_monitors("update", append_name)
 
 
 def checkpoint_status_func(checkpoint_dict, epoch_results,
@@ -340,6 +371,15 @@ def make_minibatch(arg, slice_or_indices_list):
             theano.config.floatX))]
     else:
         return [arg[slice_or_indices_list, :]]
+
+
+def gen_make_one_hot_minibatch(n_targets):
+    """ returns function that returns list """
+    def make_one_hot_minibatch(arg, slice_or_indices_list):
+        non_one_hot_minibatch = make_minibatch(
+            arg, slice_or_indices_list)[0].squeeze()
+        return [convert_to_one_hot(non_one_hot_minibatch, n_targets)]
+    return make_one_hot_minibatch
 
 
 def gen_text_minibatch_func(one_hot_size):
@@ -561,6 +601,7 @@ def iterate_function(func, list_of_minibatch_args, minibatch_size,
             if minibatch_count % n_minibatch_status == 0:
                 print("minibatch %i/%i" % (minibatch_count,
                                            len(minibatch_indices) - 1))
+                monitor_status_func(results, status_type="update")
         epoch_stop = time.time()
         output = {r: np.mean(results[r]) for r in results.keys()}
         output["minibatch_size_auto"] = minibatch_size

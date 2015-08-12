@@ -3,7 +3,6 @@
 from __future__ import print_function
 import __main__ as main
 import os
-import decimal
 import numpy as np
 import glob
 import numbers
@@ -221,8 +220,8 @@ def cleanup_checkpoints(append_name=None):
 
 
 def monitor_status_func(results_dict, append_name=None, status_type="epoch",
-                        nan_check=True):
-    """ Print the last results from a results dictionary """
+                        nan_check=True, print_output=True):
+    """ Dump the last results from a results dictionary """
     n_seen = max([len(l) for l in results_dict.values()])
     last_results = {k: v[-1] for k, v in results_dict.items()}
     # This really, really assumes a 1D numpy array (1,) or (1, 1)
@@ -240,17 +239,18 @@ def monitor_status_func(results_dict, append_name=None, status_type="epoch",
     else:
         raise ValueError("Unknown status_type %s" % status_type)
     breakline = "".join(["-"] * (len(statusline) + 1))
-    print(breakline)
-    print(fileline)
-    print(statusline)
-    print(breakline)
-    pp.pprint(last_results)
+    if print_output:
+        print(breakline)
+        print(fileline)
+        print(statusline)
+        print(breakline)
+        pp.pprint(last_results)
     if status_type == "epoch":
         save_path = os.path.join(get_checkpoint_dir(),
-                                "model_checkpoint_%i.html" % n_seen)
-    elif status_type =="update":
+                                 "model_checkpoint_%i.html" % n_seen)
+    elif status_type == "update":
         save_path = os.path.join(get_checkpoint_dir(),
-                                "model_update_%i.html" % n_seen)
+                                 "model_update_%i.html" % n_seen)
 
     if append_name is not None:
         split = save_path.split("_")
@@ -264,7 +264,7 @@ def monitor_status_func(results_dict, append_name=None, status_type="epoch",
         if nan_check and len(nan_test) > 0:
             nan_keys = set([tup[0] for tup in nan_test])
             raise ValueError("Found NaN values in the following keys ",
-                            "%s, exiting training" % nan_keys)
+                             "%s, exiting training" % nan_keys)
         show_keys = [k for k in results_dict.keys()
                      if "_auto" not in k]
         write_results_as_html(results_dict, save_path,
@@ -421,7 +421,8 @@ def iterate_function(func, list_of_minibatch_args, minibatch_size,
                      epoch_status_func=default_status_func,
                      n_minibatch_status=.1,
                      previous_epoch_results=None,
-                     shuffle=False, random_state=None):
+                     shuffle=False, random_state=None,
+                     verbose=False):
     """
     Minibatch arguments should come first.
 
@@ -561,12 +562,10 @@ def iterate_function(func, list_of_minibatch_args, minibatch_size,
     # Function loop
     global_start = time.time()
     if len(epoch_results.keys()) != 0:
-        last_training_time = epoch_results["total_training_time_s_auto"][-1]
         last_update_count = epoch_results[
             "total_number_of_updates_auto"][-1]
         last_epoch_count = epoch_results["total_number_of_epochs_auto"][-1]
     else:
-        last_training_time = 0
         last_update_count = 0
         last_epoch_count = 0
     for e in range(n_epochs):
@@ -601,7 +600,8 @@ def iterate_function(func, list_of_minibatch_args, minibatch_size,
             if minibatch_count % n_minibatch_status == 0:
                 print("minibatch %i/%i" % (minibatch_count,
                                            len(minibatch_indices) - 1))
-                monitor_status_func(results, status_type="update")
+                monitor_status_func(results, status_type="update",
+                                    print_output=verbose)
         epoch_stop = time.time()
         output = {r: np.mean(results[r]) for r in results.keys()}
         output["minibatch_size_auto"] = minibatch_size
@@ -613,11 +613,7 @@ def iterate_function(func, list_of_minibatch_args, minibatch_size,
             epoch_stop - epoch_start) / float(minibatch_count + 1)
         output["mean_sample_time_s_auto"] = (epoch_stop - epoch_start) / float(
             len(list_of_minibatch_args[0]) * (minibatch_count + 1))
-        output["mean_epoch_time_s_auto"] = (
-            epoch_stop - global_start) / float(e + 1)
         output["this_epoch_time_s_auto"] = epoch_stop - epoch_start
-        output["total_training_time_s_auto"] = (
-            epoch_stop - global_start) + last_training_time
         output["total_number_of_updates_auto"] = (
             e + 1) * (minibatch_count + 1) + last_update_count
         output["total_number_of_epochs_auto"] = e + 1 + last_epoch_count
@@ -642,7 +638,8 @@ def early_stopping_trainer(fit_function, cost_function,
                            list_of_preprocessing_functions=None,
                            n_epochs=100, n_epoch_status=1,
                            n_minibatch_status=.1, previous_epoch_results=None,
-                           shuffle=False, random_state=None):
+                           shuffle=False, random_state=None,
+                           verbose=False):
     """
     cost_function should have 1 output
     cost_function_output_name sthould be a string
@@ -657,7 +654,8 @@ def early_stopping_trainer(fit_function, cost_function,
             indices=valid_indices,
             epoch_status_func=None,
             list_of_minibatch_functions=list_of_minibatch_functions,
-            list_of_output_names=[cost_function_output_name], n_epochs=1)
+            list_of_output_names=[cost_function_output_name], n_epochs=1,
+            verbose=verbose)
         early_stopping_status_func(
             valid_results[cost_function_output_name][-1],
             cost_function_output_name,
@@ -670,5 +668,5 @@ def early_stopping_trainer(fit_function, cost_function,
         list_of_output_names=fit_function_output_names,
         previous_epoch_results=previous_epoch_results,
         epoch_status_func=status_func, n_epoch_status=n_epoch_status,
-        n_epochs=n_epochs)
+        n_epochs=n_epochs, verbose=verbose)
     return epoch_results

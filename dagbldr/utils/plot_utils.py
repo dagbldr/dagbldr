@@ -4,6 +4,7 @@ import random
 import os
 import glob
 import subprocess
+import numpy as np
 from itertools import cycle
 
 
@@ -13,7 +14,7 @@ def _get_js_path():
     return js_path
 
 
-def _filled_js_template_from_epochs_dict(epochs_dict, default_show="all"):
+def _filled_js_template_from_results_dict(results_dict, default_show="all"):
     # Uses arbiter strings in the template to split the template and stick
     # values in
     js_path = _get_js_path()
@@ -41,13 +42,19 @@ def _filled_js_template_from_epochs_dict(epochs_dict, default_show="all"):
 
     def gen_js_field_for_key_value(key, values, show=True):
         assert type(values) is list
+        if isinstance(values[0], (np.generic, np.ndarray)):
+            values = [float(v.ravel()) for v in values]
+        maxlen = 1500
+        if len(values) > maxlen:
+            values = list(np.interp(np.linspace(0, len(values), maxlen),
+                          np.arange(len(values)), values))
         show_key = "true" if show else "false"
         return "{\n    name: '%s',\n    data: %s,\n    visible: %s\n},\n" % (
             str(key), str(values), show_key)
-    data_part = [gen_js_field_for_key_value(k, epochs_dict[k], True)
+    data_part = [gen_js_field_for_key_value(k, results_dict[k], True)
                  if k in default_show or default_show == "all"
-                 else gen_js_field_for_key_value(k, epochs_dict[k], False)
-                 for k in sorted(epochs_dict.keys())]
+                 else gen_js_field_for_key_value(k, results_dict[k], False)
+                 for k in sorted(results_dict.keys())]
     all_filled_lines = first_part + imports_part + post_imports_part
     all_filled_lines = all_filled_lines + data_part + last_part
     return all_filled_lines

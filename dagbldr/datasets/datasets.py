@@ -7,6 +7,7 @@ from collections import Counter
 from scipy.io import loadmat
 from scipy.linalg import svd
 import string
+import tarfile
 import theano
 import zipfile
 import gzip
@@ -204,6 +205,69 @@ def load_mountains():
             "words": all_words.keys()}
 
 
+def check_fetch_fer():
+    """ Check that fer faces are downloaded """
+    url = 'https://dl.dropboxusercontent.com/u/15378192/fer2013.tar.gz'
+    partial_path = get_dataset_dir("fer")
+    full_path = os.path.join(partial_path, "fer2013.tar.gz")
+    if not os.path.exists(partial_path):
+        os.makedirs(partial_path)
+    if not os.path.exists(full_path):
+        download(url, full_path, progress_update_percentage=1)
+    return full_path
+
+
+def fetch_fer():
+    """
+    Flattened 48x48 fer faces with pixel values in [0 - 1]
+
+    n_samples : 35888
+    n_features : 2304
+
+    Returns
+    -------
+    summary : dict
+        A dictionary cantaining data and image statistics.
+
+        summary["data"] : array, shape (35888, 2304)
+            The flattened data for FER
+
+    """
+    data_path = check_fetch_fer()
+    t = tarfile.open(data_path, 'r')
+    f = t.extractfile(t.getnames()[0])
+    reader = csv.reader(f)
+    valid_indices = 2 * 3859
+    data = np.zeros((35888, 48 * 48), dtype="float32")
+    target = np.zeros((35888,), dtype="int32")
+    header = None
+    for n, row in enumerate(reader):
+        if n % 1000 == 0:
+            print("Reading sample %i" % n)
+        if n == 0:
+            header = row
+        else:
+            target[n] = int(row[0])
+            data[n] = np.array(map(float, row[1].split(" "))) / 255.
+    train_indices = np.arange(23709)
+    valid_indices = np.arange(23709, len(data))
+    train_mean0 = data[train_indices].mean(axis=0)
+    saved_pca_path = os.path.join(get_dataset_dir("fer"), "FER_PCA.npy")
+    if not os.path.exists(saved_pca_path):
+        print("Saved PCA not found for FER, computing...")
+        U, S, V = svd(data[train_indices] - train_mean0, full_matrices=False)
+        train_pca = V
+        np.save(saved_pca_path, train_pca)
+    else:
+        train_pca = np.load(saved_pca_path)
+    return {"data": data,
+            "target": target,
+            "train_indices": train_indices,
+            "valid_indices": valid_indices,
+            "mean0": train_mean0,
+            "pca_matrix": train_pca}
+
+
 def check_fetch_tfd():
     """ Check that tfd faces are downloaded """
     partial_path = get_dataset_dir("tfd")
@@ -255,8 +319,8 @@ def fetch_tfd():
             "train_indices": train_indices,
             "valid_indices": valid_indices,
             "test_indices": test_indices,
-            "train_mean0": train_mean0,
-            "train_pca_matrix": train_pca}
+            "mean0": train_mean0,
+            "pca_matrix": train_pca}
 
 
 def check_fetch_frey():
@@ -292,11 +356,7 @@ def fetch_frey():
     all_data = all_data.astype(theano.config.floatX)
     return {"data": all_data,
             "mean0": all_data.mean(axis=0),
-            "var0": all_data.var(axis=0),
-            "mean1": all_data.mean(axis=1),
-            "var1": all_data.var(axis=1),
-            "mean": all_data.mean(),
-            "var": all_data.var()}
+            "var0": all_data.var(axis=0)}
 
 
 def check_fetch_mnist():
@@ -325,7 +385,7 @@ def fetch_mnist():
         A dictionary cantaining data and image statistics.
 
         summary["data"] : array, shape (70000, 784)
-        summary["targets"] : array, shape (70000,)
+        summary["target"] : array, shape (70000,)
         summary["train_indices"] : array, shape (50000,)
         summary["valid_indices"] : array, shape (10000,)
         summary["test_indices"] : array, shape (10000,)
@@ -390,7 +450,7 @@ def fetch_binarized_mnist():
         A dictionary cantaining data and image statistics.
 
         summary["data"] : array, shape (70000, 784)
-        summary["targets"] : array, shape (70000,)
+        summary["target"] : array, shape (70000,)
         summary["train_indices"] : array, shape (50000,)
         summary["valid_indices"] : array, shape (10000,)
         summary["test_indices"] : array, shape (10000,)

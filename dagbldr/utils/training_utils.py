@@ -3,12 +3,15 @@
 from __future__ import print_function
 import __main__ as main
 import os
+import shutil
 import numpy as np
 import glob
 import numbers
 import theano
 import sys
 import warnings
+import inspect
+import zipfile
 import time
 import pprint
 try:
@@ -20,7 +23,7 @@ from functools import reduce
 from .plot_utils import _filled_js_template_from_results_dict
 
 # TODO: Fetch from env
-NUM_SAVED_TO_KEEP = 5
+NUM_SAVED_TO_KEEP = 2
 
 
 def get_checkpoint_dir(checkpoint_dir=None, folder=None, create_dir=True):
@@ -212,6 +215,35 @@ def cleanup_monitors(partial_match, append_name=None):
     selected_monitors = _get_file_matches(
         "*" + partial_match + "*.html", append_name)
     _remove_old_files(selected_monitors)
+
+
+def _zip_dir(src, dst):
+    zf = zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED)
+    abs_src = os.path.abspath(src)
+    exclude_exts = [".js", ".pyc", ".html", ".txt", ".csv", ".gz"]
+    for root, dirs, files in os.walk(src):
+        for fname in files:
+            if all([e not in fname for e in exclude_exts]):
+                absname = os.path.abspath(os.path.join(root, fname))
+                arcname = "dagbldr" + os.sep + absname[len(abs_src) + 1:]
+                zf.write(absname, arcname)
+    zf.close()
+
+
+def archive_dagbldr():
+    checkpoint_dir = get_checkpoint_dir()
+    saved_script = os.path.join(checkpoint_dir, main.__file__)
+    training_utils_dir = inspect.getfile(inspect.currentframe())
+    lib_dir = str(os.sep).join(training_utils_dir.split(os.sep)[:-2])
+    save_path = os.path.join(checkpoint_dir, "dagbldr_archive.zip")
+    existing_reports = glob.glob(os.path.join(checkpoint_dir, "*.html"))
+    existing_models = glob.glob(os.path.join(checkpoint_dir, "*.pkl"))
+    empty = all([len(l) == 0 for l in (existing_reports, existing_models)])
+    if not os.path.exists(saved_script) or empty:
+        print("Saving code archive %s at %s" % (lib_dir, save_path))
+        script_location = os.path.abspath(sys.argv[0])
+        shutil.copy2(script_location, saved_script)
+        _zip_dir(lib_dir, save_path)
 
 
 def cleanup_checkpoints(append_name=None):
@@ -561,6 +593,8 @@ def iterate_function(func, list_of_minibatch_args, minibatch_size,
 
     # Function loop
     global_start = time.time()
+    if not _in_nosetest():
+        archive_dagbldr()
     if len(epoch_results.keys()) != 0:
         last_update_count = epoch_results[
             "total_number_of_updates_auto"][-1]

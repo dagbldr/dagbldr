@@ -145,6 +145,22 @@ def add_arrays_to_graph(list_of_arrays, list_of_names, graph, strict=True):
         arrays_added.append(shared_array)
 
 
+def add_fixed_to_graph(list_of_fixed_numpy, list_of_shapes,
+                       list_of_names, graph, strict=True):
+    assert type(graph) is OrderedDict
+    shared_added = []
+    if RANDOM_ID not in graph.keys():
+        graph[RANDOM_ID] = []
+    for n, (fixed, shape, name) in enumerate(safe_zip(list_of_fixed_numpy,
+                                                      list_of_shapes,
+                                                      list_of_names)):
+        shared_array = as_shared(fixed, name=name)
+        tag_expression(shared_array, name, shape)
+        shared_added.append(shared_array)
+    graph[RANDOM_ID] += shared_added
+    return shared_added
+
+
 def add_random_to_graph(list_of_random, list_of_shapes, list_of_names,
                         graph, strict=True):
     assert type(graph) is OrderedDict

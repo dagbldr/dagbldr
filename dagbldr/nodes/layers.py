@@ -7,6 +7,7 @@ from theano import tensor
 from theano.sandbox.rng_mrg import MRG_RandomStreams
 from ..utils import concatenate
 from ..utils import calc_expected_dims, names_in_graph, add_arrays_to_graph
+from ..utils import add_fixed_to_graph
 from ..utils import fetch_from_graph, add_random_to_graph
 
 
@@ -98,6 +99,30 @@ def dropout_layer(list_of_inputs, graph, name, on_off_switch, dropout_prob=0.5,
     conc_input = concatenate(list_of_inputs, graph, name, axis=-1)
     dropped = dropout(conc_input, random_state, on_off_switch, p=dropout_prob)
     return dropped
+
+
+def fixed_projection_layer(list_of_inputs, transform, graph, name,
+                           bias=None, strict=True):
+    conc_input = concatenate(list_of_inputs, graph, name, axis=-1)
+    W_name = name + '_W'
+    b_name = name + '_b'
+    list_of_names = [W_name, b_name]
+    if not names_in_graph(list_of_names, graph):
+        conc_input_dim = int(sum([calc_expected_dims(graph, inp)[-1]
+                                  for inp in list_of_inputs]))
+        np_W = transform
+        if bias is None:
+            np_b = np.zeros_like(np_W[0])
+        else:
+            np_b = bias
+        list_of_shapes = [np_W.shape, np_b.shape]
+        W, b = add_fixed_to_graph([np_W, np_b], list_of_shapes,
+                                  list_of_names, graph, strict=strict)
+    else:
+        if strict:
+            raise AttributeError(
+                "Name %s already found in graph with strict mode!" % name)
+    return tensor.dot(conc_input, W) + b
 
 
 def projection_layer(list_of_inputs, graph, name, proj_dim=None,

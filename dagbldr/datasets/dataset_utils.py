@@ -48,8 +48,8 @@ def add_memory_swapper(earray, mem_size):
         earray._in_mem_limits = slice_limit
         if earray._in_mem_slice.shape[0] == 1:
             # allocate memory
-            print("Allocating %i bytes of memory for EArray swap buffer" %
-                  earray._in_mem_size)
+            print("Allocating %f gigabytes of memory for EArray swap buffer" %
+                  (earray._in_mem_size / float(1E9)))
             earray._in_mem_slice = np.empty((n_samples_that_fit,) + n_other,
                                             dtype=earray.dtype)
         # handle edge case when last chunk is smaller than what slice will
@@ -81,6 +81,20 @@ def add_memory_swapper(earray, mem_size):
                 _load_in_mem(self, start, stop)
                 lower = self._in_mem_limits[0]
             return self._in_mem_slice[start - lower:stop - lower:step]
+        elif len(key) == 2:
+            # Slice with extra axes like [1:100, :]
+            key = key[0]
+            start, stop, step = self._processRange(
+                key.start, key.stop, key.step)
+            if _check_in_mem(self, start, stop):
+                lower = self._in_mem_limits[0]
+            else:
+                # slice into memory...
+                _load_in_mem(self, start, stop)
+                lower = self._in_mem_limits[0]
+            return self._in_mem_slice[start - lower:stop - lower:step]
+        else:
+            raise ValueError("Must index with a slice object or single value along 0 axis!")
     # This line is critical...
     _cEArray.__getitem__ = getter
     return earray

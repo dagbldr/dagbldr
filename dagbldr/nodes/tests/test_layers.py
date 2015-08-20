@@ -69,11 +69,14 @@ def test_fixed_projection_layer():
                                  graph, 'proj')
     out2 = fixed_projection_layer([X_sym], rand_projection,
                                   graph, 'proj',
-                                  bias=rand_projection[0])
+                                  pre=rand_projection[:, 0])
+    out3 = fixed_projection_layer([X_sym], rand_projection,
+                                  graph, 'proj',
+                                  post=rand_projection[0])
     final = linear_layer([out2], graph, 'linear', 17,
                          random_state=random_state)
     # Test that it compiles with and without bias
-    f = theano.function([X_sym], [out, out2, final],
+    f = theano.function([X_sym], [out, out2, out3, final],
                         mode="FAST_COMPILE")
 
     # Test updates

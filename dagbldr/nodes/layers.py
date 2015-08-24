@@ -96,14 +96,16 @@ def dropout_layer(list_of_inputs, graph, name, on_off_switch, dropout_prob=0.5,
     if theano_seed == 0:
         print("WARNING: prior layer got 0 seed. Reseeding...")
         theano_seed = random_state.randint(-2**32, 2**32)
-    conc_input = concatenate(list_of_inputs, graph, name, axis=-1)
+    conc_input = concatenate(list_of_inputs, graph, name,
+                             axis=list_of_inputs[0].ndim - 1)
     dropped = dropout(conc_input, random_state, on_off_switch, p=dropout_prob)
     return dropped
 
 
 def fixed_projection_layer(list_of_inputs, transform, graph, name,
                            pre=None, post=None, strict=True):
-    conc_input = concatenate(list_of_inputs, graph, name, axis=-1)
+    conc_input = concatenate(list_of_inputs, graph, name,
+                             axis=list_of_inputs[0].ndim - 1)
     W_name = name + '_W'
     pre_name = name + '_pre'
     post_name = name + '_post'
@@ -236,7 +238,8 @@ def softmax_sample_layer(list_of_multinomial_inputs, graph, name,
         theano_seed = random_state.randint(-2**32, 2**32)
     theano_rng = MRG_RandomStreams(seed=theano_seed)
     conc_multinomial = concatenate(list_of_multinomial_inputs, graph,
-                                   name, axis=1)
+                                   name,
+                                   axis=list_of_multinomial_inputs[0].ndim - 1)
     conc_multinomial /= len(list_of_multinomial_inputs)
     samp = theano_rng.multinomial(pvals=conc_multinomial,
                                   dtype="int32")
@@ -257,8 +260,10 @@ def gaussian_sample_layer(list_of_mu_inputs, list_of_sigma_inputs,
         print("WARNING: prior layer got 0 seed. Reseeding...")
         theano_seed = random_state.randint(-2**32, 2**32)
     theano_rng = MRG_RandomStreams(seed=theano_seed)
-    conc_mu = concatenate(list_of_mu_inputs, graph, name, axis=1)
-    conc_sigma = concatenate(list_of_sigma_inputs, graph, name, axis=1)
+    conc_mu = concatenate(list_of_mu_inputs, graph, name,
+                          axis=list_of_mu_inputs[0].ndim - 1)
+    conc_sigma = concatenate(list_of_sigma_inputs, graph, name,
+                             axis=list_of_sigma_inputs[0].ndim - 1)
     e = theano_rng.normal(size=(conc_sigma.shape[0],
                                 conc_sigma.shape[1]),
                           dtype=conc_sigma.dtype)
@@ -281,8 +286,10 @@ def gaussian_log_sample_layer(list_of_mu_inputs, list_of_log_sigma_inputs,
         print("WARNING: prior layer got 0 seed. Reseeding...")
         theano_seed = random_state.randint(-2**32, 2**32)
     theano_rng = MRG_RandomStreams(seed=theano_seed)
-    conc_mu = concatenate(list_of_mu_inputs, graph, name, axis=1)
-    conc_log_sigma = concatenate(list_of_log_sigma_inputs, graph, name, axis=1)
+    conc_mu = concatenate(list_of_mu_inputs, graph, name,
+                          axis=list_of_mu_inputs[0].ndim - 1)
+    conc_log_sigma = concatenate(list_of_log_sigma_inputs, graph, name,
+                                 axis=list_of_log_sigma_inputs[0].ndim - 1)
     e = theano_rng.normal(size=(conc_log_sigma.shape[0],
                                 conc_log_sigma.shape[1]),
                           dtype=conc_log_sigma.dtype)
@@ -304,7 +311,8 @@ def tanh_recurrent_layer(list_of_inputs, mask, hidden_dim, graph, name,
         raise ValueError("Input with ndim != 3 detected!")
 
     # shape[0] is fake, but shape[1] and shape[2] are fine
-    conc_input = concatenate(list_of_inputs, graph, name + "_input", axis=-1)
+    conc_input = concatenate(list_of_inputs, graph, name + "_input",
+                             axis=list_of_inputs[0].ndim - 1)
     shape = calc_expected_dims(graph, conc_input)
     h0 = np_zeros((shape[1], hidden_dim))
     list_of_names = [name + '_h0']
@@ -353,7 +361,8 @@ def gru_recurrent_layer(list_of_inputs, mask, hidden_dim, graph, name,
         raise ValueError("Input with ndim != 3 detected!")
 
     # shape[0] is fake, but shape[1] and shape[2] are fine
-    conc_input = concatenate(list_of_inputs, graph, name + "_input", axis=-1)
+    conc_input = concatenate(list_of_inputs, graph, name + "_input",
+                             axis=list_of_inputs[0].ndim - 1)
     shape = calc_expected_dims(graph, conc_input)
     h0 = np_zeros((shape[1], hidden_dim))
     list_of_names = [name + '_h0']
@@ -419,7 +428,8 @@ def bidirectional_gru_recurrent_layer(list_of_inputs, mask, hidden_dim, graph,
     h_r = gru_recurrent_layer([i[::-1] for i in list_of_inputs], mask[::-1],
                               hidden_dim, graph, name + "_r", random_state,
                               strict=strict)
-    h = concatenate([h_f, h_r[::-1]], graph, name=name + "_conc", axis=-1)
+    h = concatenate([h_f, h_r[::-1]], graph, name=name + "_conc",
+                    axis=h_f.ndim - 1)
     return h
 
 
@@ -428,7 +438,7 @@ def shift_layer(list_of_inputs, graph, name):
     Shifts along the first axis by one step, filling with 0 in the first step
     """
     conc_input = concatenate(list_of_inputs, graph, name + "_shifted",
-                             axis=-1)
+                             axis=list_of_inputs[0].ndim - 1)
     shifted = tensor.zeros_like(conc_input)
     shifted = tensor.set_subtensor(shifted[1:], conc_input[:-1])
     return shifted
@@ -451,9 +461,9 @@ def conditional_gru_recurrent_layer(list_of_outputs, list_of_hiddens,
         raise ValueError("Input with ndim > 3 detected!")
 
     conc_output = concatenate(list_of_outputs, graph, name + "_cond_gru_step",
-                              axis=-1)
+                              axis=list_of_outputs[0].ndim - 1)
     conc_hidden = concatenate(list_of_hiddens, graph, name + "_cond_gru_hid",
-                              axis=-1)
+                              axis=list_of_hiddens[0].ndim - 1)
     context = conc_hidden[-1]
     # Decoder initializes hidden state with tanh projection of last hidden
     # context representing p(X_1...X_t)
@@ -548,9 +558,9 @@ def conditional_attention_gru_recurrent_layer(list_of_outputs, list_of_hiddens,
         raise ValueError("Input with ndim > 3 detected!")
 
     conc_output = concatenate(list_of_outputs, graph, name + "_cond_gru_step",
-                              axis=-1)
+                              axis=list_of_outputs[0].ndim - 1)
     conc_hidden = concatenate(list_of_hiddens, graph, name + "_cond_gru_hid",
-                              axis=-1)
+                              axis=list_of_hiddens[0].ndim - 1)
     context = conc_hidden.mean(axis=0)
     # Decoder initializes hidden state with tanh projection of last hidden
     # context representing p(X_1...X_t)
@@ -699,7 +709,8 @@ def lstm_recurrent_layer(list_of_inputs, mask, hidden_dim, graph, name,
         raise ValueError("Input with ndim != 3 detected!")
 
     # shape[0] is fake, but shape[1] and shape[2] are fine
-    conc_input = concatenate(list_of_inputs, graph, name + "_input", axis=-1)
+    conc_input = concatenate(list_of_inputs, graph, name + "_input",
+                             axis=list_of_inputs[0].ndim - 1)
     shape = calc_expected_dims(graph, conc_input)
     h0 = np_zeros((shape[1], hidden_dim))
     c0 = np_zeros((shape[1], hidden_dim))

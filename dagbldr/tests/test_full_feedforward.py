@@ -4,7 +4,7 @@ import theano
 
 from dagbldr.utils import add_datasets_to_graph, convert_to_one_hot
 from dagbldr.utils import get_params_and_grads
-from dagbldr.utils import iterate_function
+from dagbldr.utils import early_stopping_trainer
 from dagbldr.nodes import linear_layer, softmax_layer
 from dagbldr.nodes import categorical_crossentropy
 from dagbldr.optimizers import sgd
@@ -36,11 +36,21 @@ def test_feedforward_classifier():
     opt = sgd(params)
     updates = opt.updates(params, grads, learning_rate)
 
-    train_function = theano.function([X_sym, y_sym], [cost], updates=updates,
-                                     mode="FAST_COMPILE")
+    fit_function = theano.function([X_sym, y_sym], [cost], updates=updates,
+                                   mode="FAST_COMPILE")
 
-    iterate_function(train_function, [X, y], minibatch_size,
-                     list_of_output_names=["cost"], n_epochs=1)
+    cost_function = theano.function([X_sym, y_sym], [cost],
+                                    mode="FAST_COMPILE")
+
+    checkpoint_dict = {}
+    train_indices = np.arange(len(X))
+    valid_indices = np.arange(len(X))
+    early_stopping_trainer(fit_function, cost_function, checkpoint_dict, [X, y],
+                           minibatch_size,
+                           train_indices, valid_indices,
+                           fit_function_output_names=["cost"],
+                           cost_function_output_name="valid_cost",
+                           n_epochs=1)
 
 
 def test_feedforward_theano_mix():
@@ -62,8 +72,18 @@ def test_feedforward_theano_mix():
     opt = sgd(params)
     updates = opt.updates(params, grads, learning_rate)
 
-    train_function = theano.function([X_sym, y_sym], [cost], updates=updates,
-                                     mode="FAST_COMPILE")
+    fit_function = theano.function([X_sym, y_sym], [cost], updates=updates,
+                                   mode="FAST_COMPILE")
 
-    iterate_function(train_function, [X, y], minibatch_size,
-                     list_of_output_names=["cost"], n_epochs=1)
+    cost_function = theano.function([X_sym, y_sym], [cost],
+                                    mode="FAST_COMPILE")
+
+    checkpoint_dict = {}
+    train_indices = np.arange(len(X))
+    valid_indices = np.arange(len(X))
+    early_stopping_trainer(fit_function, cost_function, checkpoint_dict, [X, y],
+                           minibatch_size,
+                           train_indices, valid_indices,
+                           fit_function_output_names=["cost"],
+                           cost_function_output_name="valid_cost",
+                           n_epochs=1)

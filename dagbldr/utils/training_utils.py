@@ -3,6 +3,7 @@
 from __future__ import print_function
 import __main__ as main
 import os
+import re
 import shutil
 import numpy as np
 import glob
@@ -76,6 +77,66 @@ def make_character_level_from_text(text):
         pass
     all_chars = reduce(lambda x, y: set(x) | set(y), text, set())
     mapper = {k: n + 2 for n, k in enumerate(list(all_chars))}
+    # 1 is EOS
+    mapper["EOS"] = 1
+    # 0 is UNK/MASK - unused here but needed in general
+    mapper["UNK"] = 0
+    inverse_mapper = {v: k for k, v in mapper.items()}
+
+    def mapper_func(text_line):
+        return [mapper[c] if c in mapper.keys() else mapper["UNK"]
+                for c in text_line] + [mapper["EOS"]]
+
+    def inverse_mapper_func(symbol_line):
+        return "".join([inverse_mapper[s] for s in symbol_line
+                        if s != mapper["EOS"]])
+
+    # Remove blank lines
+    cleaned = [mapper_func(t) for t in text if t != ""]
+    return cleaned, mapper_func, inverse_mapper_func, mapper
+
+
+def whitespace_tokenizer(line):
+    '''Return the tokens of a sentence including punctuation.
+
+    >>> tokenize('Bob dropped the apple. Where is the apple?')
+    ['Bob', 'dropped', 'the', 'apple', '.', 'Where', 'is', 'the', 'apple', '?']
+    '''
+    return [x.strip() for x in re.split('(\W+)?', line) if x.strip()]
+
+
+def make_word_level_from_text(text, tokenizer="default"):
+    """ Create mapping and inverse mappings for text -> one_hot_char
+
+    Parameters
+    ----------
+    text : iterable of strings
+
+    Returns
+    -------
+    cleaned : list of list of ints, length (len(text), )
+         The original text, converted into list of list of integers
+
+    mapper_func : function
+         A function that can be used to map text into the correct form
+
+    inverse_mapper_func : function
+        A function that can be used to invert the output of mapper_func
+
+    mapper : dict
+        Dictionary containing the mapping of char -> integer
+
+    """
+
+    # Try to catch invalid input
+    try:
+        ord(text[0])
+        raise ValueError("Text should be iterable of strings")
+    except TypeError:
+        pass
+    all_words = reduce(lambda x, y: set(
+        whitespace_tokenizer(x)) | set(whitespace_tokenizer(y)), text, set())
+    mapper = {k: n + 2 for n, k in enumerate(list(all_words))}
     # 1 is EOS
     mapper["EOS"] = 1
     # 0 is UNK/MASK - unused here but needed in general
@@ -182,7 +243,7 @@ def load_last_checkpoint(append_name=None):
     return load_checkpoint(last_checkpoint_path)
 
 
-def write_results_as_html(results_dict, save_path, default_show="all"):
+def _write_results_as_html(results_dict, save_path, default_show="all"):
     as_html = _filled_js_template_from_results_dict(
         results_dict, default_show=default_show)
     with open(save_path, "w") as f:
@@ -211,10 +272,15 @@ def _remove_old_files(sorted_files_list):
             os.remove(f)
 
 
-def cleanup_monitors(partial_match, append_name=None):
+def _cleanup_monitors(partial_match, append_name=None):
     selected_monitors = _get_file_matches(
         "*" + partial_match + "*.html", append_name)
     _remove_old_files(selected_monitors)
+
+
+def _cleanup_checkpoints(append_name=None):
+    selected_checkpoints = _get_file_matches("*.pkl", append_name)
+    _remove_old_files(selected_checkpoints)
 
 
 def _zip_dir(src, dst):
@@ -230,25 +296,23 @@ def _zip_dir(src, dst):
     zf.close()
 
 
-def archive_dagbldr():
+def _archive_dagbldr():
     checkpoint_dir = get_checkpoint_dir()
-    saved_script = os.path.join(checkpoint_dir, main.__file__)
+    code_snapshot_dir = os.path.join(checkpoint_dir, "code_snapshot")
+    if not os.path.exists(code_snapshot_dir):
+        os.mkdir(code_snapshot_dir)
+    save_script_path = os.path.join(code_snapshot_dir, main.__file__)
     training_utils_dir = inspect.getfile(inspect.currentframe())
     lib_dir = str(os.sep).join(training_utils_dir.split(os.sep)[:-2])
-    save_path = os.path.join(checkpoint_dir, "dagbldr_archive.zip")
+    save_lib_path = os.path.join(code_snapshot_dir, "dagbldr_archive.zip")
     existing_reports = glob.glob(os.path.join(checkpoint_dir, "*.html"))
     existing_models = glob.glob(os.path.join(checkpoint_dir, "*.pkl"))
     empty = all([len(l) == 0 for l in (existing_reports, existing_models)])
-    if not os.path.exists(saved_script) or empty:
-        print("Saving code archive %s at %s" % (lib_dir, save_path))
+    if not os.path.exists(save_script_path) or empty:
+        print("Saving code archive %s at %s" % (lib_dir, save_lib_path))
         script_location = os.path.abspath(sys.argv[0])
-        shutil.copy2(script_location, saved_script)
-        _zip_dir(lib_dir, save_path)
-
-
-def cleanup_checkpoints(append_name=None):
-    selected_checkpoints = _get_file_matches("*.pkl", append_name)
-    _remove_old_files(selected_checkpoints)
+        shutil.copy2(script_location, save_script_path)
+        _zip_dir(lib_dir, save_lib_path)
 
 
 def monitor_status_func(results_dict, append_name=None, status_type="epoch",
@@ -299,12 +363,12 @@ def monitor_status_func(results_dict, append_name=None, status_type="epoch",
                              "%s, exiting training" % nan_keys)
         show_keys = [k for k in results_dict.keys()
                      if "_auto" not in k]
-        write_results_as_html(results_dict, save_path,
-                              default_show=show_keys)
+        _write_results_as_html(results_dict, save_path,
+                               default_show=show_keys)
         if status_type == "epoch":
-            cleanup_monitors("checkpoint", append_name)
+            _cleanup_monitors("checkpoint", append_name)
         elif status_type == "update":
-            cleanup_monitors("update", append_name)
+            _cleanup_monitors("update", append_name)
 
 
 def checkpoint_status_func(checkpoint_dict, epoch_results,
@@ -328,7 +392,7 @@ def checkpoint_status_func(checkpoint_dict, epoch_results,
     if not _in_nosetest():
         # Don't dump if testing!
         save_checkpoint(save_path, checkpoint_dict)
-        cleanup_checkpoints(append_name)
+        _cleanup_checkpoints(append_name)
     monitor_status_func(epoch_results, append_name=append_name)
 
 
@@ -414,47 +478,47 @@ def gen_make_one_hot_minibatch(n_targets):
     return make_one_hot_minibatch
 
 
-def gen_text_minibatch_func(one_hot_size):
+def gen_make_list_one_hot_minibatch(n_targets):
     """
-    Returns a function that will turn a text minibatch into one_hot form.
+    Returns a function that will turn a list into a minibatch of one_hot form.
 
     For use with iterate_function list_of_minibatch_functions argument.
 
     Example:
     n_chars = 84
-    text_minibatcher = gen_text_minibatch_func(n_chars)
+    text_minibatcher = gen_make_text_minibatch_func(n_chars)
     valid_results = iterate_function(
         cost_function, [X_clean_valid, y_clean_valid], minibatch_size,
         list_of_output_names=["valid_cost"],
         list_of_minibatch_functions=[text_minibatcher], n_epochs=1,
         shuffle=False)
     """
-    def apply(arg, slice_type):
+    def make_list_minibatch(arg, slice_type):
         if type(slice_type) is not slice:
             raise ValueError("Text formatters for list of list can only use "
                              "slice objects")
         sli = arg[slice_type]
-        expanded = convert_to_one_hot(sli, one_hot_size)
+        expanded = convert_to_one_hot(sli, n_targets)
         lengths = [len(s) for s in sli]
         mask = np.zeros((max(lengths), len(sli)), dtype=theano.config.floatX)
         for n, l in enumerate(lengths):
             mask[np.arange(l), n] = 1.
         return expanded, mask
-    return apply
+    return make_list_minibatch
 
 
-def iterate_function(func, list_of_minibatch_args, minibatch_size,
-                     indices=None, list_of_non_minibatch_args=None,
-                     list_of_minibatch_functions=[make_minibatch],
-                     list_of_preprocessing_functions=None,
-                     list_of_output_names=None,
-                     n_epochs=100,
-                     n_epoch_status=1,
-                     epoch_status_func=default_status_func,
-                     n_minibatch_status=.1,
-                     previous_epoch_results=None,
-                     shuffle=False, random_state=None,
-                     verbose=False):
+def _iterate_function(func, list_of_minibatch_args, minibatch_size,
+                      indices=None, list_of_non_minibatch_args=None,
+                      list_of_minibatch_functions=[make_minibatch],
+                      list_of_preprocessing_functions=None,
+                      list_of_output_names=None,
+                      n_epochs=100,
+                      n_epoch_status=1,
+                      epoch_status_func=default_status_func,
+                      n_minibatch_status=.1,
+                      previous_epoch_results=None,
+                      shuffle=False, random_state=None,
+                      verbose=False):
     """
     Minibatch arguments should come first.
 
@@ -594,7 +658,7 @@ def iterate_function(func, list_of_minibatch_args, minibatch_size,
     # Function loop
     global_start = time.time()
     if not _in_nosetest():
-        archive_dagbldr()
+        _archive_dagbldr()
     if len(epoch_results.keys()) != 0:
         last_update_count = epoch_results[
             "total_number_of_updates_auto"][-1]
@@ -681,7 +745,7 @@ def early_stopping_trainer(fit_function, cost_function,
     fit_function_names should be a list of names to map to fit_function outputs
     """
     def status_func(status_number, epoch_number, epoch_results):
-        valid_results = iterate_function(
+        valid_results = _iterate_function(
             cost_function, list_of_minibatch_args,
             minibatch_size,
             list_of_non_minibatch_args=list_of_non_minibatch_args,
@@ -695,7 +759,7 @@ def early_stopping_trainer(fit_function, cost_function,
             cost_function_output_name,
             checkpoint_dict, epoch_results)
 
-    epoch_results = iterate_function(
+    epoch_results = _iterate_function(
         fit_function, list_of_minibatch_args, minibatch_size,
         indices=train_indices,
         list_of_minibatch_functions=list_of_minibatch_functions,

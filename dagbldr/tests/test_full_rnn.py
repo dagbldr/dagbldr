@@ -5,7 +5,7 @@ from theano.compat.python2x import OrderedDict
 from dagbldr.datasets import make_sincos
 from dagbldr.optimizers import sgd
 from dagbldr.utils import add_datasets_to_graph, get_params_and_grads
-from dagbldr.utils import iterate_function
+from dagbldr.utils import early_stopping_trainer
 from dagbldr.nodes import linear_layer, squared_error, masked_cost
 from dagbldr.nodes import tanh_recurrent_layer, gru_recurrent_layer
 from dagbldr.nodes import lstm_recurrent_layer
@@ -64,8 +64,16 @@ def test_tanh_rnn():
     fit_function = theano.function([X_sym, X_mask_sym, y_sym, y_mask_sym],
                                    [cost], updates=updates, mode="FAST_COMPILE")
 
-    iterate_function(fit_function, [X, y], minibatch_size,
-                     list_of_output_names=["cost"], n_epochs=1)
+    cost_function = theano.function([X_sym, X_mask_sym, y_sym, y_mask_sym],
+                                    [cost], mode="FAST_COMPILE")
+    checkpoint_dict = {}
+    train_indices = np.arange(X.shape[1])
+    valid_indices = np.arange(X.shape[1])
+    early_stopping_trainer(fit_function, cost_function, checkpoint_dict,
+                           [X, y], minibatch_size, train_indices, valid_indices,
+                           fit_function_output_names=["cost"],
+                           cost_function_output_name="valid_cost",
+                           n_epochs=1)
 
 
 def test_gru_rnn():
@@ -105,12 +113,19 @@ def test_gru_rnn():
     opt = sgd(params)
     learning_rate = 0.01
     updates = opt.updates(params, grads, learning_rate)
-
     fit_function = theano.function([X_sym, X_mask_sym, y_sym, y_mask_sym],
                                    [cost], updates=updates, mode="FAST_COMPILE")
 
-    iterate_function(fit_function, [X, y], minibatch_size,
-                     list_of_output_names=["cost"], n_epochs=1)
+    cost_function = theano.function([X_sym, X_mask_sym, y_sym, y_mask_sym],
+                                    [cost], mode="FAST_COMPILE")
+    checkpoint_dict = {}
+    train_indices = np.arange(X.shape[1])
+    valid_indices = np.arange(X.shape[1])
+    early_stopping_trainer(fit_function, cost_function, checkpoint_dict,
+                           [X, y], minibatch_size, train_indices, valid_indices,
+                           fit_function_output_names=["cost"],
+                           cost_function_output_name="valid_cost",
+                           n_epochs=1)
 
 
 def test_lstm_rnn():
@@ -154,5 +169,13 @@ def test_lstm_rnn():
     fit_function = theano.function([X_sym, X_mask_sym, y_sym, y_mask_sym],
                                    [cost], updates=updates, mode="FAST_COMPILE")
 
-    iterate_function(fit_function, [X, y], minibatch_size,
-                     list_of_output_names=["cost"], n_epochs=1)
+    cost_function = theano.function([X_sym, X_mask_sym, y_sym, y_mask_sym],
+                                    [cost], mode="FAST_COMPILE")
+    checkpoint_dict = {}
+    train_indices = np.arange(X.shape[1])
+    valid_indices = np.arange(X.shape[1])
+    early_stopping_trainer(fit_function, cost_function, checkpoint_dict,
+                           [X, y], minibatch_size, train_indices, valid_indices,
+                           fit_function_output_names=["cost"],
+                           cost_function_output_name="valid_cost",
+                           n_epochs=1)

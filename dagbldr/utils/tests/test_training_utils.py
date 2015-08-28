@@ -1,11 +1,18 @@
 from nose.tools import assert_raises
 
 from dagbldr.utils import make_character_level_from_text, convert_to_one_hot
+from dagbldr.utils import make_embedding_minibatch
 from dagbldr.datasets import load_digits
 
 digits = load_digits()
 X = digits["data"]
 y = digits["target"]
+
+
+def test_make_embedding_minibatch():
+    fake_str_int = [[1, 5, 7, 1, 6, 2], [2, 3, 6, 2], [3, 3, 3, 3, 3, 3, 3]]
+    uniform_minibatch, mask = make_embedding_minibatch(
+        fake_str_int, slice(0, 2))
 
 
 def test_convert_to_one_hot():
@@ -38,3 +45,6 @@ def test_character_level_from_text():
     # Make sure last tag is EOS
     if new_clean[-1] != m["EOS"]:
         raise AssertionError("Failed to add EOS tag")
+
+if __name__ == "__main__":
+    test_make_embedding_minibatch()

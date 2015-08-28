@@ -176,6 +176,26 @@ def add_random_to_graph(list_of_random, list_of_shapes, list_of_names,
     return random_added
 
 
+def add_embedding_datasets_to_graph(list_of_embedding_vectors, list_of_masks,
+                                    base_name, graph, strict=True):
+    assert type(list_of_masks) is list
+    assert type(list_of_embedding_vectors) is list
+    assert len(list_of_embedding_vectors) == len(list_of_masks)
+    embeddings = []
+    masks = []
+    for n, (v, m) in enumerate(zip(list_of_embedding_vectors, list_of_masks)):
+        assert type(v) is list
+        assert type(m) is np.ndarray
+        embedding_names = [base_name + "_%s_%s" % (n, i) for i in range(len(v))]
+        mask_names = [base_name + "_%s_mask" % i for i in range(len([m]))]
+        r1 = add_datasets_to_graph(v + [m],
+                                   embedding_names + mask_names,
+                                   graph, strict=True)
+        embeddings.append(r1[:len(embedding_names)])
+        masks += r1[len(embedding_names):]
+    return embeddings, masks
+
+
 def add_datasets_to_graph(list_of_datasets, list_of_names, graph, strict=True,
                           list_of_test_values=None):
     assert type(graph) is OrderedDict
@@ -207,9 +227,11 @@ def add_datasets_to_graph(list_of_datasets, list_of_names, graph, strict=True,
             sym.tag.test_value = list_of_test_values[n]
         tag_expression(sym, name, dataset.shape)
         datasets_added.append(sym)
-    graph[DATASETS_ID] = datasets_added
-    if len(datasets_added) == 1:
-        # Make returned value easier to access
+    if DATASETS_ID not in graph.keys():
+        graph[DATASETS_ID] = []
+    graph[DATASETS_ID] += datasets_added
+    if len(list_of_datasets) == 1:
+        # Make it easier if you only added a single dataset
         datasets_added = datasets_added[0]
     return datasets_added
 

@@ -7,9 +7,10 @@ from numpy.testing import assert_almost_equal
 
 from dagbldr.datasets import load_digits
 from dagbldr.optimizers import sgd
-from dagbldr.utils import add_datasets_to_graph, convert_to_one_hot
-from dagbldr.utils import get_params_and_grads
-from dagbldr.nodes import fixed_projection_layer
+from dagbldr.utils import add_embedding_datasets_to_graph, convert_to_one_hot
+from dagbldr.utils import add_datasets_to_graph
+from dagbldr.utils import get_params_and_grads, make_embedding_minibatch
+from dagbldr.nodes import fixed_projection_layer, embedding_layer
 from dagbldr.nodes import projection_layer, linear_layer, softmax_layer
 from dagbldr.nodes import sigmoid_layer, tanh_layer, softplus_layer
 from dagbldr.nodes import exp_layer, relu_layer, dropout_layer
@@ -57,6 +58,27 @@ def test_dropout_layer():
     full = f(np.ones_like(X), 0)[0]
     # Make sure drop switch works
     assert_almost_equal((full.sum() / 2) / drop.sum(), 1., decimal=2)
+
+
+def test_embedding_layer():
+    random_state = np.random.RandomState(1999)
+    graph = OrderedDict()
+    max_index = 100
+    proj_dim = 12
+    fake_str_int = [[1, 5, 7, 1, 6, 2], [2, 3, 6, 2], [3, 3, 3, 3, 3, 3, 3]]
+    minibatch, mask = make_embedding_minibatch(
+        fake_str_int, slice(0, 3))
+    (emb_slices,), (emb_mask,) = add_embedding_datasets_to_graph(
+        [minibatch], [mask], "emb", graph)
+    emb = embedding_layer(emb_slices, max_index, proj_dim, graph,
+                          'emb', random_state)
+    followup_dim = 17
+    proj = linear_layer([emb], graph, 'proj', followup_dim,
+                        random_state)
+    f = theano.function(emb_slices, [proj], mode="FAST_COMPILE")
+    out, = f(*minibatch)
+    assert(out.shape[-1] == 17)
+    assert(out.shape[-2] == len(fake_str_int))
 
 
 def test_fixed_projection_layer():
@@ -155,7 +177,7 @@ def test_gaussian_sample_layer():
                            random_state=random_state)
     samp = gaussian_sample_layer([mu], [sigma], graph, 'gaussian_sample',
                                  random_state=random_state)
-    out = linear_layer([samp], graph, 'out',proj_dim=10,
+    out = linear_layer([samp], graph, 'out', proj_dim=10,
                        random_state=random_state)
     f = theano.function([X_sym], [out], mode="FAST_COMPILE")
 

@@ -6,6 +6,8 @@ import numpy as np
 from collections import Counter
 from scipy.io import loadmat
 from scipy.linalg import svd
+from functools import reduce
+from ..utils import whitespace_tokenizer
 import string
 import tarfile
 import theano
@@ -119,6 +121,167 @@ def fetch_uci_words():
             data = [l.strip() for l in data if l != ""]
             all_data.extend(data)
     return list(set(all_data))
+
+
+def _parse_stories(lines, only_supporting=False):
+    """ Preprocessing code modified from Keras and Stephen Merity
+    http://smerity.com/articles/2015/keras_qa.html
+    https://github.com/fchollet/keras/blob/master/examples/babi_rnn.py
+
+    Parse stories provided in the bAbi tasks format
+
+    If only_supporting is true, only the sentences that support the answer are
+    kept.
+    """
+    data = []
+    story = []
+    for line in lines:
+        line = line.decode('utf-8').strip()
+        nid, line = line.split(' ', 1)
+        nid = int(nid)
+        if nid == 1:
+            story = []
+        if '\t' in line:
+            q, a, supporting = line.split('\t')
+            q = whitespace_tokenizer(q)
+            substory = None
+            if only_supporting:
+                # Only select the related substory
+                supporting = map(int, supporting.split())
+                substory = [story[i - 1] for i in supporting]
+            else:
+                # Provide all the substories
+                substory = [x for x in story if x]
+            data.append((substory, q, a))
+            story.append('')
+        else:
+            sent = whitespace_tokenizer(line)
+            story.append(sent)
+    return data
+
+
+def _get_stories(f, only_supporting=False, max_length=None):
+    """ Preprocessing code modified from Keras and Stephen Merity
+    http://smerity.com/articles/2015/keras_qa.html
+    https://github.com/fchollet/keras/blob/master/examples/babi_rnn.py
+
+    Given a file name, read the file, retrieve the stories, and then convert
+    the sentences into a single story.
+
+    If max_length is supplied, any stories longer than max_length tokens will be
+    discarded.
+    """
+    data = _parse_stories(f.readlines(), only_supporting=only_supporting)
+    flatten = lambda data: reduce(lambda x, y: x + y, data)
+    data = [(flatten(story), q, answer) for story, q, answer in data
+            if not max_length or len(flatten(story)) < max_length]
+    return data
+
+
+def _vectorize_stories(data, vocab_size, word_idx):
+    """ Preprocessing code modified from Keras and Stephen Merity
+    http://smerity.com/articles/2015/keras_qa.html
+    https://github.com/fchollet/keras/blob/master/examples/babi_rnn.py
+    """
+    X = []
+    Xq = []
+    y = []
+    for story, query, answer in data:
+        x = [word_idx[w] for w in story]
+        xq = [word_idx[w] for w in query]
+        yi = np.zeros(vocab_size)
+        yi[word_idx[answer]] = 1
+        X.append(x)
+        Xq.append(xq)
+        y.append(yi)
+    return X, Xq, np.array(y)
+
+
+def check_fetch_babi():
+    """ Check for babi task data
+
+    "Towards AI-Complete Question Answering: A Set of Prerequisite Toy Tasks"
+    J. Weston, A. Bordes, S. Chopra, T. Mikolov, A. Rush
+    http://arxiv.org/abs/1502.05698
+    """
+    url = "http://www.thespermwhale.com/jaseweston/babi/tasks_1-20_v1-2.tar.gz"
+    partial_path = get_dataset_dir("babi")
+    full_path = os.path.join(partial_path, "tasks_1-20_v1-2.tar.gz")
+    if not os.path.exists(partial_path):
+        os.makedirs(partial_path)
+    if not os.path.exists(full_path):
+        download(url, full_path, progress_update_percentage=1)
+    return full_path
+
+
+def fetch_babi(task_number=2):
+    """ Fetch data for babi tasks described in
+    "Towards AI-Complete Question Answering: A Set of Prerequisite Toy Tasks"
+    J. Weston, A. Bordes, S. Chopra, T. Mikolov, A. Rush
+    http://arxiv.org/abs/1502.05698
+
+    Preprocessing code modified from Keras and Stephen Merity
+    http://smerity.com/articles/2015/keras_qa.html
+    https://github.com/fchollet/keras/blob/master/examples/babi_rnn.py
+
+    n_samples : 1000 - 10000 (task dependent)
+
+    Returns
+    -------
+    summary : dict
+        A dictionary cantaining data
+
+        summary["stories"] : list
+            List of list of ints
+
+        summary["queries"] : list
+            List of list of ints
+
+        summary["target"] : list
+            List of list of int
+
+        summary["train_indices"] : array
+            Indices for training samples
+
+        summary["valid_indices"] : array
+            Indices for validation samples
+
+        summary["vocabulary_size"] : int
+            Total vocabulary size
+    """
+
+    data_path = check_fetch_babi()
+    tar = tarfile.open(data_path)
+    if task_number == 2:
+        challenge = 'tasks_1-20_v1-2/en/qa2_two-supporting-facts_{}.txt'
+    else:
+        raise ValueError("No other supported tasks at this time")
+    # QA2 with 1000 samples
+    train = _get_stories(tar.extractfile(challenge.format('train')))
+    test = _get_stories(tar.extractfile(challenge.format('test')))
+
+    vocab = sorted(reduce(lambda x, y: x | y, (
+        set(story + q + [answer]) for story, q, answer in train + test)))
+    # Reserve 0 for masking via pad_sequences
+    vocab_size = len(vocab) + 1
+    word_idx = dict((c, i + 1) for i, c in enumerate(vocab))
+    # story_maxlen = max(map(len, (x for x, _, _ in train + test)))
+    # query_maxlen = max(map(len, (x for _, x, _ in train + test)))
+
+    X_story, X_query, y_answer = _vectorize_stories(train, vocab_size, word_idx)
+    valid_X_story, valid_X_query, valid_y_answer = _vectorize_stories(
+        test, vocab_size, word_idx)
+    train_indices = np.arange(len(y_answer))
+    valid_indices = np.arange(len(valid_y_answer)) + len(y_answer)
+
+    X_story, X_query, y_answer = _vectorize_stories(train + test, vocab_size,
+                                                    word_idx)
+    return {"stories": X_story,
+            "queries": X_query,
+            "target": y_answer,
+            "train_indices": train_indices,
+            "valid_indices": valid_indices,
+            "vocabulary_size": vocab_size}
 
 
 def check_fetch_lovecraft():

@@ -142,6 +142,34 @@ def fixed_projection_layer(list_of_inputs, transform, graph, name,
     return tensor.dot(conc_input + t_pre, W) + t_post
 
 
+def embedding_layer(list_of_index_inputs, max_index, proj_dim, graph, name,
+                    random_state=None, strict=True, init_func=np_rand):
+    check_type = any([index_input.dtype != "int32"
+                      for index_input in list_of_index_inputs])
+    check_dim = any([index_input.ndim != 1
+                     for index_input in list_of_index_inputs])
+    if check_type or check_dim:
+        raise ValueError("index_input must be an ivector!")
+    embedding_W_name = name + "_embedding_W"
+    list_of_names = [embedding_W_name]
+    if not names_in_graph(list_of_names, graph):
+        assert random_state is not None
+        np_embedding_W = init_func((max_index, proj_dim), random_state)
+        add_arrays_to_graph([np_embedding_W], list_of_names, graph,
+                            strict=strict)
+    else:
+        if strict:
+            raise AttributeError(
+                "Name %s already found in graph with strict mode!" % name)
+    embedding_W, = fetch_from_graph(list_of_names, graph)
+    embeddings = [embedding_W[index_input]
+                  for index_input in list_of_index_inputs]
+    # could sum instead?
+    output = concatenate(embeddings, graph, name, axis=embedding_W.ndim - 1)
+    n_lists = len(list_of_index_inputs)
+    return output.reshape((-1, n_lists, proj_dim))
+
+
 def projection_layer(list_of_inputs, graph, name, proj_dim=None,
                      random_state=None, strict=True, init_func=np_tanh_fan,
                      func=linear):

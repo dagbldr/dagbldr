@@ -94,7 +94,8 @@ def add_memory_swapper(earray, mem_size):
                 lower = self._in_mem_limits[0]
             return self._in_mem_slice[start - lower:stop - lower:step]
         else:
-            raise ValueError("Must index with a slice object or single value along 0 axis!")
+            raise ValueError("Must index with a slice object or single value"
+                             "along 0 axis!")
     # This line is critical...
     _cEArray.__getitem__ = getter
     return earray

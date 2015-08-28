@@ -469,6 +469,21 @@ def make_minibatch(arg, slice_or_indices_list):
         return [arg[slice_or_indices_list, :]]
 
 
+def make_embedding_minibatch(arg, slice_type):
+    if type(slice_type) is not slice:
+        raise ValueError("Text formatters for list of list can only use "
+                         "slice objects")
+    sli = arg[slice_type]
+    lengths = [len(s) for s in sli]
+    maxlen = max(lengths)
+    mask = np.zeros((max(lengths), len(sli)), dtype=theano.config.floatX)
+    expanded = [np.zeros((maxlen,), dtype="int32") for s in sli]
+    for n, l in enumerate(lengths):
+        mask[:l, n] = 1.
+        expanded[n][:l] = sli[n]
+    return expanded, mask
+
+
 def gen_make_one_hot_minibatch(n_targets):
     """ returns function that returns list """
     def make_one_hot_minibatch(arg, slice_or_indices_list):
@@ -493,7 +508,7 @@ def gen_make_list_one_hot_minibatch(n_targets):
         list_of_minibatch_functions=[text_minibatcher], n_epochs=1,
         shuffle=False)
     """
-    def make_list_minibatch(arg, slice_type):
+    def make_list_one_hot_minibatch(arg, slice_type):
         if type(slice_type) is not slice:
             raise ValueError("Text formatters for list of list can only use "
                              "slice objects")
@@ -504,7 +519,7 @@ def gen_make_list_one_hot_minibatch(n_targets):
         for n, l in enumerate(lengths):
             mask[np.arange(l), n] = 1.
         return expanded, mask
-    return make_list_minibatch
+    return make_list_one_hot_minibatch
 
 
 def _iterate_function(func, list_of_minibatch_args, minibatch_size,
@@ -680,7 +695,13 @@ def _iterate_function(func, list_of_minibatch_args, minibatch_size,
                 else:
                     # list of minibatch_functions can't always be the right size
                     # (enc-dec with mask coming from mb func)
-                    minibatch_args += list_of_minibatch_functions[n](arg, mi)
+                    r = list_of_minibatch_functions[n](arg, mi)
+                    # support embeddings
+                    if type(r[0]) is list:
+                        minibatch_args += r[0]
+                        minibatch_args += r[1:]
+                    else:
+                        minibatch_args += r
             if list_of_non_minibatch_args is not None:
                 all_args = minibatch_args + list_of_non_minibatch_args
             else:

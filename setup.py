@@ -12,6 +12,10 @@ setuptools.setup(
         os.path.abspath(__file__)), 'README.rst')).read(),
     license='BSD 3-clause',
     url='http://github.com/dagbldr/dagbldr/',
+    package_data={
+       'dagbldr': ['utils/js_plot_dependencies/*.html',
+                   'utils/js_plot_dependencies/js/*']
+    },
     install_requires=['numpy',
                       'scipy',
                       'theano',

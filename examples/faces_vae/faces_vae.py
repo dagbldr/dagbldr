@@ -34,20 +34,25 @@ height = 48
 n_input = width * height
 
 # encode path aka q
-l1_enc = softplus_layer([X_sym], graph, 'l1_enc', n_enc_layer[0], random_state)
+l1_enc = softplus_layer([X_sym], graph, 'l1_enc', n_enc_layer[0],
+                        random_state=random_state)
 l2_enc = softplus_layer([l1_enc], graph, 'l2_enc',  n_enc_layer[1],
-                        random_state)
-code_mu = linear_layer([l2_enc], graph, 'code_mu', n_code, random_state)
+                        random_state=random_state)
+code_mu = linear_layer([l2_enc], graph, 'code_mu', n_code,
+                       random_state=random_state)
 code_log_sigma = linear_layer([l2_enc], graph, 'code_log_sigma', n_code,
-                              random_state)
+                              random_state=random_state)
 kl = gaussian_log_kl([code_mu], [code_log_sigma], graph, 'kl').mean()
 samp = gaussian_log_sample_layer([code_mu], [code_log_sigma], graph, 'samp',
                                  random_state)
 
 # decode path aka p
-l1_dec = softplus_layer([samp], graph, 'l1_dec',  n_dec_layer[0], random_state)
-l2_dec = softplus_layer([l1_dec], graph, 'l2_dec', n_dec_layer[1], random_state)
-out = linear_layer([l2_dec], graph, 'out', n_input, random_state)
+l1_dec = softplus_layer([samp], graph, 'l1_dec',  n_dec_layer[0],
+                        random_state=random_state)
+l2_dec = softplus_layer([l1_dec], graph, 'l2_dec', n_dec_layer[1],
+                        random_state=random_state)
+out = linear_layer([l2_dec], graph, 'out', n_input,
+                   random_state=random_state)
 
 nll = squared_error(out, X_sym).mean()
 # log p(x) = -nll so swap sign

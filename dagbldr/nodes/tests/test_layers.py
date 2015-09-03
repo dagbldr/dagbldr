@@ -60,6 +60,37 @@ def test_dropout_layer():
     assert_almost_equal((full.sum() / 2) / drop.sum(), 1., decimal=2)
 
 
+def test_batch_normalization():
+    random_state = np.random.RandomState(1999)
+    graph = OrderedDict()
+    X_sym, y_sym = add_datasets_to_graph([X, y], ["X", "y"], graph,
+                                         list_of_test_values=[X, y])
+    on_off = tensor.iscalar()
+    on_off.tag.test_value = 1
+    l1 = relu_layer([X_sym], graph, "proj", proj_dim=5,
+                    batch_normalize=True, mode_switch=on_off,
+                    random_state=random_state)
+    l2 = relu_layer([l1], graph, "proj2", proj_dim=5,
+                    batch_normalize=True, mode_switch=on_off,
+                    random_state=random_state)
+    f = theano.function([X_sym, on_off], [l2], mode="FAST_COMPILE")
+    params, grads = get_params_and_grads(graph, l2.mean())
+    opt = sgd(params)
+    updates = opt.updates(params, grads, .1)
+    train_f = theano.function([X_sym, on_off], [l2], mode="FAST_COMPILE",
+                              updates=updates)
+    valid_f = theano.function([X_sym, on_off], [l2], mode="FAST_COMPILE")
+    X1 = random_state.rand(*X.shape)
+    X2 = np.vstack([X1, .5 * X1])
+    t1 = train_f(X1, 0)[0]
+    t2 = valid_f(X1, 1)[0]
+    t3 = train_f(X2, 0)[0]
+    t4 = valid_f(X1, 1)[0]
+    t5 = valid_f(X1, 1)[0]
+    assert_almost_equal(t4, t5)
+    assert_raises(AssertionError, assert_almost_equal, t2, t4)
+
+
 def test_embedding_layer():
     random_state = np.random.RandomState(1999)
     graph = OrderedDict()
@@ -74,7 +105,7 @@ def test_embedding_layer():
                           'emb', random_state)
     followup_dim = 17
     proj = linear_layer([emb], graph, 'proj', followup_dim,
-                        random_state)
+                        random_state=random_state)
     f = theano.function(emb_slices, [proj], mode="FAST_COMPILE")
     out, = f(*minibatch)
     assert(out.shape[-1] == 17)

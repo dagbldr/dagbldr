@@ -365,8 +365,7 @@ def fetch_from_graph(list_of_names, graph):
     return [graph[name] for name in list_of_names]
 
 
-def get_params_and_grads(graph, cost):
-    grads = []
+def get_params_and_grads(graph, cost, verbose=False):
     params = []
     for k, p in graph.items():
         if k == DATASETS_ID:
@@ -375,8 +374,20 @@ def get_params_and_grads(graph, cost):
         if k == RANDOM_ID:
             # skip random
             continue
-        print("Computing grad w.r.t %s" % k)
-        grad = tensor.grad(cost, p)
         params.append(p)
-        grads.append(grad)
+
+    if verbose:
+        grads = []
+        for k, p in graph.items():
+            if k == DATASETS_ID:
+                # skip datasets
+                continue
+            if k == RANDOM_ID:
+                # skip random
+                continue
+            print("Computing grad w.r.t %s" % k)
+            grad = tensor.grad(cost, p)
+            grads.append(grad)
+    else:
+        grads = tensor.grad(cost, params)
     return params, grads

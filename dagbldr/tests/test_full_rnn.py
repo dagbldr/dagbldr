@@ -42,13 +42,15 @@ def test_tanh_rnn():
         datasets_list, names_list, graph, list_of_test_values=test_values_list)
 
     # Setup weights
-    l1 = linear_layer([X_sym], graph, 'l1_proj', n_hid, random_state)
+    l1 = linear_layer([X_sym], graph, 'l1_proj', proj_dim=n_hid,
+                      random_state=random_state)
 
     h = tanh_recurrent_layer([l1], X_mask_sym, n_hid, graph, 'l1_rec',
                              random_state)
 
     # linear output activation
-    y_hat = linear_layer([h], graph, 'l2_proj', n_out, random_state)
+    y_hat = linear_layer([h], graph, 'l2_proj', proj_dim=n_out,
+                         random_state=random_state)
 
     # error between output and target
     cost = squared_error(y_hat, y_sym)
@@ -95,13 +97,15 @@ def test_gru_rnn():
         datasets_list, names_list, graph, list_of_test_values=test_values_list)
 
     # Setup weights
-    l1 = linear_layer([X_sym], graph, 'l1_proj', n_hid, random_state)
+    l1 = linear_layer([X_sym], graph, 'l1_proj', n_hid,
+                      random_state=random_state)
 
     h = gru_recurrent_layer([l1], X_mask_sym, n_hid, graph, 'l1_rec',
                             random_state)
 
     # linear output activation
-    y_hat = linear_layer([h], graph, 'l2_proj', n_out, random_state)
+    y_hat = linear_layer([h], graph, 'l2_proj', n_out,
+                         random_state=random_state)
 
     # error between output and target
     cost = squared_error(y_hat, y_sym)
@@ -147,13 +151,15 @@ def test_lstm_rnn():
         datasets_list, names_list, graph, list_of_test_values=test_values_list)
 
     # Setup weights
-    l1 = linear_layer([X_sym], graph, 'l1_proj', n_hid, random_state)
+    l1 = linear_layer([X_sym], graph, 'l1_proj', n_hid,
+                      random_state=random_state)
 
     h = lstm_recurrent_layer([l1], X_mask_sym, n_hid, graph, 'l1_rec',
                              random_state)
 
     # linear output activation
-    y_hat = linear_layer([h], graph, 'l2_proj', n_out, random_state)
+    y_hat = linear_layer([h], graph, 'l2_proj', n_out,
+                         random_state=random_state)
 
     # error between output and target
     cost = squared_error(y_hat, y_sym)

@@ -56,7 +56,7 @@ def test_conditional_gru_recurrent():
 
     # linear output activation
     y_hat = softmax_layer([h_dec, context, shifted_y_sym], graph, 'l2_proj',
-                          n_out, random_state)
+                          n_out, random_state=random_state)
 
     # error between output and target
     cost = categorical_crossentropy(y_hat, y_sym)
@@ -114,7 +114,7 @@ def test_conditional_attention_gru_recurrent():
 
     # linear output activation
     y_hat = softmax_layer([h_dec, context, shifted_y_sym], graph, 'l2_proj',
-                          n_out, random_state)
+                          n_out, random_state=random_state)
 
     # error between output and target
     cost = categorical_crossentropy(y_hat, y_sym)

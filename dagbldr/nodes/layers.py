@@ -16,6 +16,11 @@ def np_zeros(shape):
     return np.zeros(shape).astype(theano.config.floatX)
 
 
+def np_ones(shape):
+    """ Builds a numpy variable filled with zeros """
+    return np.ones(shape).astype(theano.config.floatX)
+
+
 def np_rand(shape, random_state):
     # Make sure bounds aren't the same
     return random_state.uniform(low=-0.08, high=0.08, size=shape).astype(
@@ -170,7 +175,51 @@ def embedding_layer(list_of_index_inputs, max_index, proj_dim, graph, name,
     return output.reshape((-1, n_lists, proj_dim))
 
 
+def _batch_normalization(input_variable, graph, name, mode_switch,
+                         alpha=0.5, strict=True):
+    """Based on batch normalization by Jan Schluter for Lasagne"""
+    G_name = name + '_G'
+    B_name = name + '_B'
+    list_of_names = [G_name, B_name]
+    if not names_in_graph(list_of_names, graph):
+        input_dim = calc_expected_dims(graph, input_variable)[-1]
+        np_G = np_ones((input_dim,))
+        np_B = np_zeros((input_dim,))
+        add_arrays_to_graph([np_G, np_B], list_of_names, graph,
+                            strict=strict)
+    else:
+        if strict:
+            raise AttributeError(
+                "Name %s already found in graph with strict mode!" % name)
+    G, B = fetch_from_graph(list_of_names, graph)
+    eps = 1E-6
+    batch_mean = input_variable.mean(axis=0, keepdims=True)
+    batch_std = input_variable.std(axis=0, keepdims=True)
+    running_mean = theano.clone(batch_mean, share_inputs=True)
+    running_std = theano.clone(batch_std, share_inputs=True)
+    running_mean_shape = calc_expected_dims(graph, batch_mean)
+    running_std_shape = calc_expected_dims(graph, batch_std)
+    running_mean, running_std = add_random_to_graph(
+        [running_mean, running_std],
+        [running_mean_shape, running_std_shape],
+        [name + '_running_mean', name + '_running_std'], graph)
+    running_mean.default_update = ((1 - alpha) * running_mean
+                                   + alpha * batch_mean)
+    running_std.default_update = ((1 - alpha) * running_std
+                                  + alpha * running_std)
+    # include running_{mean, std} in computation graph for updates...
+    fixed = (input_variable - running_mean) / (running_std + eps)
+    batch = (input_variable - batch_mean) / (batch_std + eps)
+    normed = (1 - mode_switch) * batch + mode_switch * fixed
+    out = G * normed + B
+    normed_shape = calc_expected_dims(graph, input_variable)
+    # necessary to get decent shape inference
+    out, = add_random_to_graph([out], [normed_shape], [name + "_bn_out"], graph)
+    return out
+
+
 def projection_layer(list_of_inputs, graph, name, proj_dim=None,
+                     batch_normalize=False, mode_switch=None,
                      random_state=None, strict=True, init_func=np_tanh_fan,
                      func=linear):
     W_name = name + '_W'
@@ -193,6 +242,9 @@ def projection_layer(list_of_inputs, graph, name, proj_dim=None,
     conc_input = concatenate(list_of_inputs, graph, name,
                              axis=list_of_inputs[0].ndim - 1)
     output = tensor.dot(conc_input, W) + b
+    if batch_normalize:
+        assert mode_switch is not None
+        output = _batch_normalization(output, graph, name, mode_switch)
     if func is not None:
         final = func(output)
     else:
@@ -200,60 +252,74 @@ def projection_layer(list_of_inputs, graph, name, proj_dim=None,
     return final
 
 
-def linear_layer(list_of_inputs, graph, name, proj_dim=None, random_state=None,
-                 strict=True, init_func=np_tanh_fan):
+def linear_layer(list_of_inputs, graph, name, proj_dim=None,
+                 batch_normalize=False, mode_switch=None,
+                 random_state=None, strict=True, init_func=np_tanh_fan):
     return projection_layer(
         list_of_inputs=list_of_inputs, graph=graph, name=name,
-        proj_dim=proj_dim, random_state=random_state,
+        proj_dim=proj_dim, batch_normalize=batch_normalize,
+        mode_switch=mode_switch, random_state=random_state,
         strict=strict, init_func=init_func, func=linear)
 
 
-def sigmoid_layer(list_of_inputs, graph, name, proj_dim=None, random_state=None,
-                  strict=True, init_func=np_sigmoid_fan):
+def sigmoid_layer(list_of_inputs, graph, name, proj_dim=None,
+                  batch_normalize=False, mode_switch=None,
+                  random_state=None, strict=True, init_func=np_sigmoid_fan):
     return projection_layer(
         list_of_inputs=list_of_inputs, graph=graph, name=name,
-        proj_dim=proj_dim, random_state=random_state,
+        proj_dim=proj_dim, batch_normalize=batch_normalize,
+        mode_switch=mode_switch, random_state=random_state,
         strict=strict, init_func=init_func, func=tensor.nnet.sigmoid)
 
 
-def tanh_layer(list_of_inputs, graph, name, proj_dim=None, random_state=None,
-               strict=True, init_func=np_tanh_fan):
+def tanh_layer(list_of_inputs, graph, name, proj_dim=None,
+               batch_normalize=False, mode_switch=None,
+               random_state=None, strict=True, init_func=np_tanh_fan):
     return projection_layer(
         list_of_inputs=list_of_inputs, graph=graph, name=name,
-        proj_dim=proj_dim, random_state=random_state,
-        strict=strict, init_func=init_func, func=tensor.tanh)
+        proj_dim=proj_dim, batch_normalize=batch_normalize, mode_switch=None,
+        random_state=random_state, strict=strict, init_func=init_func,
+        func=tensor.tanh)
 
 
 def softplus_layer(list_of_inputs, graph, name, proj_dim=None,
+                   batch_normalize=False, mode_switch=None,
                    random_state=None, strict=True,
                    init_func=np_tanh_fan):
     return projection_layer(
         list_of_inputs=list_of_inputs, graph=graph, name=name,
-        proj_dim=proj_dim, random_state=random_state,
+        proj_dim=proj_dim, batch_normalize=batch_normalize,
+        mode_switch=mode_switch, random_state=random_state,
         strict=strict, init_func=init_func, func=softplus)
 
 
-def exp_layer(list_of_inputs, graph, name, proj_dim=None, random_state=None,
-              strict=True, init_func=np_tanh_fan):
+def exp_layer(list_of_inputs, graph, name, proj_dim=None,
+              batch_normalize=False, mode_switch=None,
+              random_state=None, strict=True, init_func=np_tanh_fan):
     return projection_layer(
         list_of_inputs=list_of_inputs, graph=graph, name=name,
-        proj_dim=proj_dim, random_state=random_state,
+        proj_dim=proj_dim, batch_normalize=batch_normalize,
+        mode_switch=mode_switch, random_state=random_state,
         strict=strict, init_func=init_func, func=tensor.exp)
 
 
-def relu_layer(list_of_inputs, graph, name, proj_dim=None, random_state=None,
-               strict=True, init_func=np_tanh_fan):
+def relu_layer(list_of_inputs, graph, name, proj_dim=None,
+               batch_normalize=False, mode_switch=None,
+               random_state=None, strict=True, init_func=np_tanh_fan):
     return projection_layer(
         list_of_inputs=list_of_inputs, graph=graph, name=name,
-        proj_dim=proj_dim, random_state=random_state,
+        proj_dim=proj_dim, batch_normalize=batch_normalize,
+        mode_switch=mode_switch, random_state=random_state,
         strict=strict, init_func=init_func, func=relu)
 
 
-def softmax_layer(list_of_inputs, graph, name, proj_dim=None, random_state=None,
-                  strict=True, init_func=np_tanh_fan):
+def softmax_layer(list_of_inputs, graph, name, proj_dim=None,
+                  batch_normalize=False, mode_switch=None,
+                  random_state=None, strict=True, init_func=np_tanh_fan):
     return projection_layer(
         list_of_inputs=list_of_inputs, graph=graph, name=name,
-        proj_dim=proj_dim, random_state=random_state,
+        proj_dim=proj_dim, batch_normalize=batch_normalize,
+        mode_switch=mode_switch, random_state=random_state,
         strict=strict, init_func=init_func, func=softmax)
 
 

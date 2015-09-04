@@ -182,15 +182,27 @@ def test_relu_layer():
 
 
 def test_softmax_layer():
-    run_common_layer(softmax_layer)
+    graph = OrderedDict()
+    X_sym, y_sym = add_datasets_to_graph([X, y], ["X", "y"], graph)
+    single_o = softmax_layer([X_sym], graph, 'single', proj_dim=5)
+    concat_o = softmax_layer([X_sym, y_sym], graph, 'concat', proj_dim=5)
+    # Check that things can be reused
+    repeated_o = softmax_layer([X_sym], graph, 'single', strict=False)
+
+    # Check that strict mode raises an error if repeated
+    assert_raises(AttributeError, softmax_layer, [X_sym], graph, 'concat')
+
+    f = theano.function([X_sym, y_sym], [single_o, concat_o, repeated_o],
+                        mode="FAST_COMPILE")
+    single, concat, repeat = f(X, y)
+    assert_almost_equal(single, repeat)
 
 
 def test_softmax_sample_layer():
     random_state = np.random.RandomState(42)
     graph = OrderedDict()
     X_sym, y_sym = add_datasets_to_graph([X, y], ["X", "y"], graph)
-    softmax = softmax_layer([X_sym], graph, 'softmax', proj_dim=20,
-                            random_state=random_state)
+    softmax = softmax_layer([X_sym], graph, 'softmax', proj_dim=20)
     samp = softmax_sample_layer([softmax], graph, 'softmax_sample',
                                 random_state=random_state)
     out = linear_layer([samp], graph, 'out', proj_dim=10,

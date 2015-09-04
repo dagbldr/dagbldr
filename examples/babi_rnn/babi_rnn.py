@@ -64,7 +64,7 @@ l1_query = embedding_layer(X_query_syms, vocab_size, n_emb, graph, 'l1_query',
 h_query = gru_recurrent_layer([l1_query], X_query_mask_sym, n_hid, graph,
                               'query_rec', random_state)
 y_pred = softmax_layer([h_query[-1], h_story[-1]], graph, 'y_pred',
-                       y_answer.shape[1], random_state=random_state)
+                       y_answer.shape[1])
 cost = categorical_crossentropy(y_pred, y_sym).mean()
 params, grads = get_params_and_grads(graph, cost)
 

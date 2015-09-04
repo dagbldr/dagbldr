@@ -19,11 +19,32 @@ class sgd(object):
         return updates
 
 
+class sgd_momentum(object):
+    """
+    SGD with momentum
+    """
+    def __init__(self, params):
+        self.memory_ = [theano.shared(np.zeros_like(p.get_value()))
+                        for p in params]
+
+    def updates(self, params, grads, learning_rate, momentum):
+        updates = []
+        for n, (param, grad) in enumerate(zip(params, grads)):
+            memory = self.memory_[n]
+            updates.append((param, param - learning_rate * grad))
+            updates.append((memory, momentum * memory + (1. - momentum) * grad))
+        return updates
+
+
 class sgd_nesterov(object):
     """
     SGD with nesterov momentum
 
     Based on example from Yann D.
+
+    See Formula 7 from
+    Advances in Optimizing Recurrent Neural Networks
+    Y. Benio, N. Boulanger-Lewandowski, R. Pascanu
     """
     def __init__(self, params):
         self.memory_ = [theano.shared(np.zeros_like(p.get_value()))
@@ -46,40 +67,27 @@ class rmsprop(object):
     RMSProp with nesterov momentum and gradient rescaling
     """
     def __init__(self, params):
-        self.running_square_ = [theano.shared(np.zeros_like(p.get_value()))
-                                for p in params]
-        self.running_avg_ = [theano.shared(np.zeros_like(p.get_value()))
-                             for p in params]
         self.memory_ = [theano.shared(np.zeros_like(p.get_value()))
                         for p in params]
 
     def updates(self, params, grads, learning_rate, momentum, rescale=5.):
         grad_norm = tensor.sqrt(sum(map(lambda x: tensor.sqr(x).sum(), grads)))
-        not_finite = tensor.or_(tensor.isnan(grad_norm),
-                                tensor.isinf(grad_norm))
         scaling_num = rescale
         scaling_den = tensor.maximum(rescale, grad_norm)
+        scaling = scaling_num / scaling_den
         # Magic constants
-        combination_coeff = 0.9
-        minimum_grad = 1E-4
+        decay = 0.9
+        minimum_grad = 1E-6
         updates = []
         for n, (param, grad) in enumerate(zip(params, grads)):
-            grad = tensor.switch(not_finite, 0.1 * param,
-                                 grad * (scaling_num / scaling_den))
-            old_square = self.running_square_[n]
-            new_square = combination_coeff * old_square + (
-                1. - combination_coeff) * tensor.sqr(grad)
-            old_avg = self.running_avg_[n]
-            new_avg = combination_coeff * old_avg + (
-                1. - combination_coeff) * grad
-            rms_grad = tensor.sqrt(new_square - new_avg ** 2)
-            rms_grad = tensor.maximum(rms_grad, minimum_grad)
+            grad *= scaling
             memory = self.memory_[n]
-            update = momentum * memory - learning_rate * grad / rms_grad
+            decayed = decay * memory + (1 - decay) * grad ** 2
+            grad_scale = tensor.sqrt(decayed + minimum_grad)
+            grad = grad / grad_scale
+            update = momentum * memory - learning_rate * grad
             update2 = momentum * momentum * memory - (
-                1 + momentum) * learning_rate * grad / rms_grad
-            updates.append((old_square, new_square))
-            updates.append((old_avg, new_avg))
+                1 + momentum) * learning_rate * grad
             updates.append((memory, update))
             updates.append((param, param + update2))
         return updates

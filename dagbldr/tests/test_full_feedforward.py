@@ -27,8 +27,7 @@ def test_feedforward_classifier():
 
     l1_o = linear_layer([X_sym], graph, 'l1', proj_dim=20,
                         random_state=random_state)
-    y_pred = softmax_layer([l1_o], graph, 'pred', n_classes,
-                           random_state=random_state)
+    y_pred = softmax_layer([l1_o], graph, 'pred', n_classes)
 
     cost = categorical_crossentropy(y_pred, y_sym).mean()
     params, grads = get_params_and_grads(graph, cost)
@@ -63,8 +62,7 @@ def test_feedforward_theano_mix():
     l1_o = linear_layer([X_sym], graph, 'l1', proj_dim=20,
                         random_state=random_state)
     l1_o = .999 * l1_o
-    y_pred = softmax_layer([l1_o], graph, 'pred', n_classes,
-                           random_state=random_state)
+    y_pred = softmax_layer([l1_o], graph, 'pred', n_classes)
 
     cost = categorical_crossentropy(y_pred, y_sym).mean()
     params, grads = get_params_and_grads(graph, cost)

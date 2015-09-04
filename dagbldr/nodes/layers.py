@@ -5,7 +5,7 @@ from scipy import linalg
 import theano
 from theano import tensor
 from theano.sandbox.rng_mrg import MRG_RandomStreams
-from ..utils import concatenate
+from ..utils import concatenate, as_shared
 from ..utils import calc_expected_dims, names_in_graph, add_arrays_to_graph
 from ..utils import add_fixed_to_graph
 from ..utils import fetch_from_graph, add_random_to_graph
@@ -192,13 +192,15 @@ def _batch_normalization(input_variable, graph, name, mode_switch,
             raise AttributeError(
                 "Name %s already found in graph with strict mode!" % name)
     G, B = fetch_from_graph(list_of_names, graph)
-    eps = 1E-6
+    eps = 1E-20
     batch_mean = input_variable.mean(axis=0, keepdims=True)
     batch_std = input_variable.std(axis=0, keepdims=True)
-    running_mean = theano.clone(batch_mean, share_inputs=True)
-    running_std = theano.clone(batch_std, share_inputs=True)
     running_mean_shape = calc_expected_dims(graph, batch_mean)
     running_std_shape = calc_expected_dims(graph, batch_std)
+    running_mean = theano.clone(batch_mean, share_inputs=True)
+    running_std = theano.clone(batch_std, share_inputs=True)
+    #running_mean = as_shared(np_zeros(running_mean_shape))
+    #running_std = as_shared(np_zeros(running_std_shape))
     running_mean, running_std = add_random_to_graph(
         [running_mean, running_std],
         [running_mean_shape, running_std_shape],
@@ -206,7 +208,11 @@ def _batch_normalization(input_variable, graph, name, mode_switch,
     running_mean.default_update = ((1 - alpha) * running_mean
                                    + alpha * batch_mean)
     running_std.default_update = ((1 - alpha) * running_std
-                                  + alpha * running_std)
+                                  + alpha * batch_std)
+    running_mean = tensor.addbroadcast(running_mean, 0)
+    running_std = tensor.addbroadcast(running_std, 0)
+    batch_mean += 0 * running_mean
+    batch_std += 0 * running_std
     # include running_{mean, std} in computation graph for updates...
     fixed = (input_variable - running_mean) / (running_std + eps)
     batch = (input_variable - batch_mean) / (batch_std + eps)
@@ -313,14 +319,16 @@ def relu_layer(list_of_inputs, graph, name, proj_dim=None,
         strict=strict, init_func=init_func, func=relu)
 
 
-def softmax_layer(list_of_inputs, graph, name, proj_dim=None,
-                  batch_normalize=False, mode_switch=None,
-                  random_state=None, strict=True, init_func=np_tanh_fan):
-    return projection_layer(
-        list_of_inputs=list_of_inputs, graph=graph, name=name,
-        proj_dim=proj_dim, batch_normalize=batch_normalize,
-        mode_switch=mode_switch, random_state=random_state,
-        strict=strict, init_func=init_func, func=softmax)
+def softmax_layer(list_of_inputs, graph, name, proj_dim=None, strict=True):
+    def softmax_init(shape, random_state):
+        return np_zeros(shape)
+    return projection_layer(list_of_inputs=list_of_inputs, graph=graph,
+                            name=name, proj_dim=proj_dim,
+                            batch_normalize=False, mode_switch=None,
+                            # random state is unused but necessary for proj
+                            random_state=np.random.RandomState(0),
+                            strict=strict, init_func=softmax_init,
+                            func=softmax)
 
 
 def softmax_sample_layer(list_of_multinomial_inputs, graph, name,

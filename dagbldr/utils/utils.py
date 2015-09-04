@@ -365,6 +365,16 @@ def fetch_from_graph(list_of_names, graph):
     return [graph[name] for name in list_of_names]
 
 
+def get_weights_from_graph(graph, verbose=False):
+    weights = []
+    for k, v in graph.items():
+        if "_W" in k:
+            weights.append(v)
+            if verbose:
+                print("Fetching weight %s from graph" % k)
+    return weights
+
+
 def get_params_and_grads(graph, cost, verbose=False):
     params = []
     for k, p in graph.items():

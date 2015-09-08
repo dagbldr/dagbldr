@@ -319,7 +319,8 @@ def relu_layer(list_of_inputs, graph, name, proj_dim=None,
         strict=strict, init_func=init_func, func=relu)
 
 
-def softmax_layer(list_of_inputs, graph, name, proj_dim=None, strict=True):
+def softmax_zeros_layer(list_of_inputs, graph, name, proj_dim=None,
+                        strict=True):
     def softmax_init(shape, random_state):
         return np_zeros(shape)
     return projection_layer(list_of_inputs=list_of_inputs, graph=graph,
@@ -328,6 +329,15 @@ def softmax_layer(list_of_inputs, graph, name, proj_dim=None, strict=True):
                             # random state is unused but necessary for proj
                             random_state=np.random.RandomState(0),
                             strict=strict, init_func=softmax_init,
+                            func=softmax)
+
+
+def softmax_layer(list_of_inputs, graph, name, proj_dim=None,
+                  random_state=None, strict=True, init_func=np_tanh_fan):
+    return projection_layer(list_of_inputs=list_of_inputs, graph=graph,
+                            name=name, proj_dim=proj_dim,
+                            random_state=random_state,
+                            strict=strict, init_func=init_func,
                             func=softmax)
 
 

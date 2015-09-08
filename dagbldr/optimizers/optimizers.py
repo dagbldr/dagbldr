@@ -69,26 +69,36 @@ class rmsprop(object):
     def __init__(self, params):
         self.memory_ = [theano.shared(np.zeros_like(p.get_value()))
                         for p in params]
+        self.squared_memory_ = [theano.shared(np.zeros_like(p.get_value()))
+                                for p in params]
+        self.momentum_memory_ = [theano.shared(np.zeros_like(p.get_value()))
+                                 for p in params]
 
     def updates(self, params, grads, learning_rate, momentum, rescale=5.):
         grad_norm = tensor.sqrt(sum(map(lambda x: tensor.sqr(x).sum(), grads)))
         scaling_num = rescale
         scaling_den = tensor.maximum(rescale, grad_norm)
         scaling = scaling_num / scaling_den
-        # Magic constants
-        decay = 0.9
-        minimum_grad = 1E-6
+        # constants, from AG "Generating Sequences with Recurrent Neural
+        # Networks"
+        decay = 0.95
+        minimum_grad = 1E-4
         updates = []
         for n, (param, grad) in enumerate(zip(params, grads)):
             grad *= scaling
             memory = self.memory_[n]
-            decayed = decay * memory + (1 - decay) * grad ** 2
-            grad_scale = tensor.sqrt(decayed + minimum_grad)
-            grad = grad / grad_scale
-            update = momentum * memory - learning_rate * grad
-            update2 = momentum * momentum * memory - (
-                1 + momentum) * learning_rate * grad
-            updates.append((memory, update))
+            squared_memory = self.squared_memory_[n]
+            momentum_memory = self.momentum_memory_[n]
+            grad_gi = decay * memory + (1 - decay) * grad
+            decayed_ni = decay * squared_memory + (1 - decay) * grad ** 2
+            grad_scaled = grad / tensor.sqrt(
+                decayed_ni - grad_gi ** 2 + minimum_grad)
+            update = momentum * momentum_memory - learning_rate * grad_scaled
+            update2 = momentum * momentum * momentum_memory - (
+                1 + momentum) * learning_rate * grad_scaled
+            updates.append((memory, grad_gi))
+            updates.append((squared_memory, decayed_ni))
+            updates.append((momentum_memory, update))
             updates.append((param, param + update2))
         return updates
 
@@ -110,6 +120,42 @@ class adagrad(object):
             p_t = param - learning_rate * g_t
             updates.append((memory, m_t))
             updates.append((param, p_t))
+        return updates
+
+
+class adadelta(object):
+    """
+    An adaptive learning rate optimizer
+
+    For more information, see:
+    Matthew D. Zeiler, "ADADELTA: An Adaptive Learning Rate Method"
+    arXiv:1212.5701.
+    """
+    def __init__(self, params):
+        self.running_up2_ = [theano.shared(np.zeros_like(p.get_value()))
+                             for p in params]
+        self.running_grads2_ = [theano.shared(np.zeros_like(p.get_value()))
+                                for p in params]
+        self.previous_grads_ = [theano.shared(np.zeros_like(p.get_value()))
+                                for p in params]
+
+    def updates(self, params, grads, running_grad_decay=0.95,
+                running_up_decay=0.95, eps=1E-6):
+        updates = []
+        for n, (param, grad) in enumerate(zip(params, grads)):
+            running_grad2 = self.running_grads2_[n]
+            running_up2 = self.running_up2_[n]
+            previous_grad = self.previous_grads_[n]
+            rg2up = running_grad_decay * running_grad2 + (
+                1. - running_grad_decay) * (grad ** 2)
+            updir = -tensor.sqrt(running_up2 + eps) / tensor.sqrt(
+                running_grad2 + eps) * previous_grad
+            ru2up = running_up_decay * running_up2 + (
+                1. - running_up_decay) * (updir ** 2)
+            updates.append((previous_grad, grad))
+            updates.append((running_grad2, rg2up))
+            updates.append((running_up2, ru2up))
+            updates.append((param, param + updir))
         return updates
 
 

@@ -3,12 +3,12 @@ import numpy as np
 import theano
 
 from dagbldr.datasets import fetch_mnist
-from dagbldr.optimizers import sgd_momentum
+from dagbldr.optimizers import rmsprop
 from dagbldr.utils import add_datasets_to_graph, get_params_and_grads
 from dagbldr.utils import get_weights_from_graph
 from dagbldr.utils import convert_to_one_hot
 from dagbldr.utils import early_stopping_trainer
-from dagbldr.nodes import relu_layer, softmax_zeros_layer
+from dagbldr.nodes import tanh_layer, softmax_zeros_layer
 from dagbldr.nodes import categorical_crossentropy
 
 
@@ -29,7 +29,7 @@ random_state = np.random.RandomState(1999)
 minibatch_size = 20
 n_hid = 1000
 
-l1 = relu_layer([X_sym], graph, 'l1', proj_dim=n_hid, random_state=random_state)
+l1 = tanh_layer([X_sym], graph, 'l1', proj_dim=n_hid, random_state=random_state)
 y_pred = softmax_zeros_layer([l1], graph, 'y_pred',  proj_dim=n_targets)
 nll = categorical_crossentropy(y_pred, y_sym).mean()
 weights = get_weights_from_graph(graph)
@@ -39,9 +39,9 @@ cost = nll + .0001 * L2
 
 params, grads = get_params_and_grads(graph, cost)
 
-learning_rate = 0.01
-momentum = 0.1
-opt = sgd_momentum(params)
+learning_rate = 1E-4
+momentum = 0.95
+opt = rmsprop(params)
 updates = opt.updates(params, grads, learning_rate, momentum)
 
 fit_function = theano.function([X_sym, y_sym], [cost], updates=updates)

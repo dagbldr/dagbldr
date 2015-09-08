@@ -20,9 +20,9 @@ from dagbldr.utils import make_embedding_minibatch, make_minibatch
 from dagbldr.utils import add_embedding_datasets_to_graph, add_datasets_to_graph
 from dagbldr.utils import early_stopping_trainer
 from dagbldr.utils import get_params_and_grads
-from dagbldr.nodes import gru_recurrent_layer, softmax_layer, embedding_layer
-from dagbldr.nodes import categorical_crossentropy
-from dagbldr.optimizers import adam
+from dagbldr.nodes import gru_recurrent_layer, softmax_layer
+from dagbldr.nodes import embedding_layer, categorical_crossentropy
+from dagbldr.optimizers import adadelta
 
 
 babi = fetch_babi(task_number=2)
@@ -54,7 +54,7 @@ y_sym = add_datasets_to_graph([y_answer], ["y"], graph)
 
 
 l1_story = embedding_layer(X_story_syms, vocab_size, n_emb, graph, 'l1_story',
-                           random_state)
+                           random_state=random_state)
 masked_story = X_story_mask_sym.dimshuffle(0, 1, 'x') * l1_story
 h_story = gru_recurrent_layer([masked_story], X_story_mask_sym, n_hid, graph,
                               'story_rec', random_state)
@@ -64,13 +64,12 @@ l1_query = embedding_layer(X_query_syms, vocab_size, n_emb, graph, 'l1_query',
 h_query = gru_recurrent_layer([l1_query], X_query_mask_sym, n_hid, graph,
                               'query_rec', random_state)
 y_pred = softmax_layer([h_query[-1], h_story[-1]], graph, 'y_pred',
-                       y_answer.shape[1])
+                       y_answer.shape[1], random_state=random_state)
 cost = categorical_crossentropy(y_pred, y_sym).mean()
 params, grads = get_params_and_grads(graph, cost)
 
-opt = adam(params)
-learning_rate = 0.001
-updates = opt.updates(params, grads, learning_rate)
+opt = adadelta(params)
+updates = opt.updates(params, grads)
 print("Compiling fit...")
 fit_function = theano.function(X_story_syms + [X_story_mask_sym] + X_query_syms
                                + [X_query_mask_sym, y_sym], [cost],
@@ -99,4 +98,4 @@ epoch_results = early_stopping_trainer(
                                  make_embedding_minibatch,
                                  make_minibatch],
     fit_function_output_names=["cost"],
-    cost_function_output_name="valid_cost", n_epochs=20)
+    cost_function_output_name="valid_cost", n_epochs=100)

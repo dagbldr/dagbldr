@@ -9,7 +9,7 @@ from dagbldr.utils import add_datasets_to_graph, get_params_and_grads
 from dagbldr.utils import get_weights_from_graph
 from dagbldr.utils import convert_to_one_hot
 from dagbldr.utils import early_stopping_trainer
-from dagbldr.nodes import relu_layer, softmax_layer
+from dagbldr.nodes import relu_layer, softmax_zeros_layer
 from dagbldr.nodes import categorical_crossentropy
 
 
@@ -36,7 +36,7 @@ on_off.tag.test_value = 0
 l1 = relu_layer([X_sym], graph, 'l1', proj_dim=n_hid,
                 batch_normalize=True, mode_switch=on_off,
                 random_state=random_state)
-y_pred = softmax_layer([l1], graph, 'y_pred',  proj_dim=n_targets)
+y_pred = softmax_zeros_layer([l1], graph, 'y_pred',  proj_dim=n_targets)
 nll = categorical_crossentropy(y_pred, y_sym).mean()
 weights = get_weights_from_graph(graph)
 L2 = sum([(w ** 2).sum() for w in weights])
@@ -67,6 +67,7 @@ def error(*args):
     y_pred = predict_function(*final_args)[0]
     return 1 - np.mean((np.argmax(
         y_pred, axis=1).ravel()) == (np.argmax(y, axis=1).ravel()))
+
 
 def bn_fit_function(X, y):
     return fit_function(X, y, 0)

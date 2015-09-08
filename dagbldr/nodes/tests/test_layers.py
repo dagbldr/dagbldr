@@ -12,6 +12,7 @@ from dagbldr.utils import add_datasets_to_graph
 from dagbldr.utils import get_params_and_grads, make_embedding_minibatch
 from dagbldr.nodes import fixed_projection_layer, embedding_layer
 from dagbldr.nodes import projection_layer, linear_layer, softmax_layer
+from dagbldr.nodes import softmax_zeros_layer
 from dagbldr.nodes import sigmoid_layer, tanh_layer, softplus_layer
 from dagbldr.nodes import exp_layer, relu_layer, dropout_layer
 from dagbldr.nodes import softmax_sample_layer, gaussian_sample_layer
@@ -182,10 +183,14 @@ def test_relu_layer():
 
 
 def test_softmax_layer():
+    run_common_layer(softmax_layer)
+
+
+def test_softmax_zeros_layer():
     graph = OrderedDict()
     X_sym, y_sym = add_datasets_to_graph([X, y], ["X", "y"], graph)
-    single_o = softmax_layer([X_sym], graph, 'single', proj_dim=5)
-    concat_o = softmax_layer([X_sym, y_sym], graph, 'concat', proj_dim=5)
+    single_o = softmax_zeros_layer([X_sym], graph, 'single', proj_dim=5)
+    concat_o = softmax_zeros_layer([X_sym, y_sym], graph, 'concat', proj_dim=5)
     # Check that things can be reused
     repeated_o = softmax_layer([X_sym], graph, 'single', strict=False)
 
@@ -202,7 +207,8 @@ def test_softmax_sample_layer():
     random_state = np.random.RandomState(42)
     graph = OrderedDict()
     X_sym, y_sym = add_datasets_to_graph([X, y], ["X", "y"], graph)
-    softmax = softmax_layer([X_sym], graph, 'softmax', proj_dim=20)
+    softmax = softmax_layer([X_sym], graph, 'softmax', proj_dim=20,
+                            random_state=random_state)
     samp = softmax_sample_layer([softmax], graph, 'softmax_sample',
                                 random_state=random_state)
     out = linear_layer([samp], graph, 'out', proj_dim=10,

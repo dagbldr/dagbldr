@@ -40,7 +40,8 @@ n_input = width * height
 # q(y_pred | x)
 y_l1_enc = softplus_layer([X_sym], graph, 'y_l1_enc', n_enc_layer[0],
                           random_state=random_state)
-y_pred = softmax_layer([y_l1_enc], graph, 'y_pred',  n_targets)
+y_pred = softmax_layer([y_l1_enc], graph, 'y_pred',  n_targets,
+                       random_state=random_state)
 
 # partial q(z | x, y_pred)
 X_l1_enc = softplus_layer([X_sym, y_pred], graph, 'X_l1_enc', n_enc_layer[1],

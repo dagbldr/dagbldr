@@ -3,16 +3,18 @@
 import numpy as np
 import theano
 from theano import tensor
+from ..utils import as_shared
 
 
 class sgd(object):
     """
     Vanilla SGD
     """
-    def __init__(self, params):
-        pass
+    def __init__(self, params, learning_rate):
+        self.learning_rate = as_shared(learning_rate)
 
-    def updates(self, params, grads, learning_rate):
+    def updates(self, params, grads):
+        learning_rate = self.learning_rate
         updates = []
         for n, (param, grad) in enumerate(zip(params, grads)):
             updates.append((param, param - learning_rate * grad))
@@ -23,11 +25,15 @@ class sgd_momentum(object):
     """
     SGD with momentum
     """
-    def __init__(self, params):
+    def __init__(self, params, learning_rate, momentum):
+        self.learning_rate = as_shared(learning_rate)
+        self.momentum = momentum
         self.memory_ = [theano.shared(np.zeros_like(p.get_value()))
                         for p in params]
 
-    def updates(self, params, grads, learning_rate, momentum):
+    def updates(self, params, grads):
+        learning_rate = self.learning_rate
+        momentum = self.momentum
         updates = []
         for n, (param, grad) in enumerate(zip(params, grads)):
             memory = self.memory_[n]
@@ -46,11 +52,15 @@ class sgd_nesterov(object):
     Advances in Optimizing Recurrent Neural Networks
     Y. Benio, N. Boulanger-Lewandowski, R. Pascanu
     """
-    def __init__(self, params):
+    def __init__(self, params, learning_rate, momentum):
+        self.learning_rate = as_shared(learning_rate)
+        self.momentum = momentum
         self.memory_ = [theano.shared(np.zeros_like(p.get_value()))
                         for p in params]
 
-    def updates(self, params, grads, learning_rate, momentum):
+    def updates(self, params, grads):
+        learning_rate = self.learning_rate
+        momentum = self.momentum
         updates = []
         for n, (param, grad) in enumerate(zip(params, grads)):
             memory = self.memory_[n]
@@ -66,7 +76,10 @@ class rmsprop(object):
     """
     RMSProp with nesterov momentum and gradient rescaling
     """
-    def __init__(self, params):
+    def __init__(self, params, learning_rate, momentum, rescale=5.):
+        self.learning_rate = as_shared(learning_rate)
+        self.momentum = momentum
+        self.rescale = rescale
         self.memory_ = [theano.shared(np.zeros_like(p.get_value()))
                         for p in params]
         self.squared_memory_ = [theano.shared(np.zeros_like(p.get_value()))
@@ -74,7 +87,10 @@ class rmsprop(object):
         self.momentum_memory_ = [theano.shared(np.zeros_like(p.get_value()))
                                  for p in params]
 
-    def updates(self, params, grads, learning_rate, momentum, rescale=5.):
+    def updates(self, params, grads):
+        learning_rate = self.learning_rate
+        momentum = self.momentum
+        rescale = self.rescale
         grad_norm = tensor.sqrt(sum(map(lambda x: tensor.sqr(x).sum(), grads)))
         scaling_num = rescale
         scaling_den = tensor.maximum(rescale, grad_norm)
@@ -107,11 +123,15 @@ class adagrad(object):
     """
     Adagrad optimizer
     """
-    def __init__(self, params):
+    def __init__(self, params, learning_rate, eps=1E-8):
+        self.learning_rate = as_shared(learning_rate)
+        self.eps = eps
         self.memory_ = [theano.shared(np.zeros_like(p.get_value()))
                         for p in params]
 
-    def updates(self, params, grads, learning_rate, eps=1E-8):
+    def updates(self, params, grads):
+        learning_rate = self.learning_rate
+        eps = self.eps
         updates = []
         for n, (param, grad) in enumerate(zip(params, grads)):
             memory = self.memory_[n]
@@ -131,7 +151,11 @@ class adadelta(object):
     Matthew D. Zeiler, "ADADELTA: An Adaptive Learning Rate Method"
     arXiv:1212.5701.
     """
-    def __init__(self, params):
+    def __init__(self, params, running_grad_decay=0.95, running_up_decay=0.95,
+                 eps=1E-6):
+        self.running_grad_decay = running_grad_decay
+        self.running_up_decay = running_up_decay
+        self.eps = eps
         self.running_up2_ = [theano.shared(np.zeros_like(p.get_value()))
                              for p in params]
         self.running_grads2_ = [theano.shared(np.zeros_like(p.get_value()))
@@ -139,8 +163,10 @@ class adadelta(object):
         self.previous_grads_ = [theano.shared(np.zeros_like(p.get_value()))
                                 for p in params]
 
-    def updates(self, params, grads, running_grad_decay=0.95,
-                running_up_decay=0.95, eps=1E-6):
+    def updates(self, params, grads):
+        running_grad_decay = self.running_grad_decay
+        running_up_decay = self.running_up_decay
+        eps = self.eps
         updates = []
         for n, (param, grad) in enumerate(zip(params, grads)):
             running_grad2 = self.running_grads2_[n]
@@ -165,14 +191,22 @@ class adam(object):
 
     Based on implementation from @NewMu / Alex Radford
     """
-    def __init__(self, params):
+    def __init__(self, params, learning_rate, b1=0.1, b2=0.001, eps=1E-8):
+        self.learning_rate = as_shared(learning_rate)
+        self.b1 = b1
+        self.b2 = b2
+        self.eps = eps
         self.memory_ = [theano.shared(np.zeros_like(p.get_value()))
                         for p in params]
         self.velocity_ = [theano.shared(np.zeros_like(p.get_value()))
                           for p in params]
         self.itr_ = theano.shared(np.array(0.).astype(theano.config.floatX))
 
-    def updates(self, params, grads, learning_rate, b1=0.1, b2=0.001, eps=1E-8):
+    def updates(self, params, grads):
+        learning_rate = self.learning_rate
+        b1 = self.b1
+        b2 = self.b2
+        eps = self.eps
         updates = []
         itr = self.itr_
         i_t = itr + 1.

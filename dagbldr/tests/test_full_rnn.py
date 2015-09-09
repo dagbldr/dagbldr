@@ -59,9 +59,9 @@ def test_tanh_rnn():
     params, grads = get_params_and_grads(graph, cost)
 
     # Use stochastic gradient descent to optimize
-    opt = sgd(params)
     learning_rate = 0.001
-    updates = opt.updates(params, grads, learning_rate)
+    opt = sgd(params, learning_rate)
+    updates = opt.updates(params, grads)
 
     fit_function = theano.function([X_sym, X_mask_sym, y_sym, y_mask_sym],
                                    [cost], updates=updates, mode="FAST_COMPILE")
@@ -71,10 +71,12 @@ def test_tanh_rnn():
     checkpoint_dict = {}
     train_indices = np.arange(X.shape[1])
     valid_indices = np.arange(X.shape[1])
-    early_stopping_trainer(fit_function, cost_function, checkpoint_dict,
-                           [X, y], minibatch_size, train_indices, valid_indices,
-                           fit_function_output_names=["cost"],
-                           cost_function_output_name="valid_cost",
+    early_stopping_trainer(fit_function, cost_function,
+                           train_indices, valid_indices,
+                           checkpoint_dict,
+                           [X, y], minibatch_size,
+                           list_of_train_output_names=["cost"],
+                           valid_output_name="valid_cost",
                            n_epochs=1)
 
 
@@ -114,9 +116,9 @@ def test_gru_rnn():
     params, grads = get_params_and_grads(graph, cost)
 
     # Use stochastic gradient descent to optimize
-    opt = sgd(params)
     learning_rate = 0.01
-    updates = opt.updates(params, grads, learning_rate)
+    opt = sgd(params, learning_rate)
+    updates = opt.updates(params, grads)
     fit_function = theano.function([X_sym, X_mask_sym, y_sym, y_mask_sym],
                                    [cost], updates=updates, mode="FAST_COMPILE")
 
@@ -125,10 +127,12 @@ def test_gru_rnn():
     checkpoint_dict = {}
     train_indices = np.arange(X.shape[1])
     valid_indices = np.arange(X.shape[1])
-    early_stopping_trainer(fit_function, cost_function, checkpoint_dict,
-                           [X, y], minibatch_size, train_indices, valid_indices,
-                           fit_function_output_names=["cost"],
-                           cost_function_output_name="valid_cost",
+    early_stopping_trainer(fit_function, cost_function,
+                           train_indices, valid_indices,
+                           checkpoint_dict,
+                           [X, y], minibatch_size,
+                           list_of_train_output_names=["cost"],
+                           valid_output_name="valid_cost",
                            n_epochs=1)
 
 
@@ -168,9 +172,9 @@ def test_lstm_rnn():
     params, grads = get_params_and_grads(graph, cost)
 
     # Use stochastic gradient descent to optimize
-    opt = sgd(params)
     learning_rate = 0.01
-    updates = opt.updates(params, grads, learning_rate)
+    opt = sgd(params, learning_rate)
+    updates = opt.updates(params, grads)
 
     fit_function = theano.function([X_sym, X_mask_sym, y_sym, y_mask_sym],
                                    [cost], updates=updates, mode="FAST_COMPILE")
@@ -180,8 +184,10 @@ def test_lstm_rnn():
     checkpoint_dict = {}
     train_indices = np.arange(X.shape[1])
     valid_indices = np.arange(X.shape[1])
-    early_stopping_trainer(fit_function, cost_function, checkpoint_dict,
-                           [X, y], minibatch_size, train_indices, valid_indices,
-                           fit_function_output_names=["cost"],
-                           cost_function_output_name="valid_cost",
+    early_stopping_trainer(fit_function, cost_function,
+                           train_indices, valid_indices,
+                           checkpoint_dict,
+                           [X, y], minibatch_size,
+                           list_of_train_output_names=["cost"],
+                           valid_output_name="valid_cost",
                            n_epochs=1)

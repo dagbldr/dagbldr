@@ -199,8 +199,6 @@ def _batch_normalization(input_variable, graph, name, mode_switch,
     running_std_shape = calc_expected_dims(graph, batch_std)
     running_mean = theano.clone(batch_mean, share_inputs=True)
     running_std = theano.clone(batch_std, share_inputs=True)
-    #running_mean = as_shared(np_zeros(running_mean_shape))
-    #running_std = as_shared(np_zeros(running_std_shape))
     running_mean, running_std = add_random_to_graph(
         [running_mean, running_std],
         [running_mean_shape, running_std_shape],
@@ -283,7 +281,8 @@ def tanh_layer(list_of_inputs, graph, name, proj_dim=None,
                random_state=None, strict=True, init_func=np_tanh_fan):
     return projection_layer(
         list_of_inputs=list_of_inputs, graph=graph, name=name,
-        proj_dim=proj_dim, batch_normalize=batch_normalize, mode_switch=None,
+        proj_dim=proj_dim, batch_normalize=batch_normalize,
+        mode_switch=mode_switch,
         random_state=random_state, strict=strict, init_func=init_func,
         func=tensor.tanh)
 

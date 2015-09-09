@@ -18,7 +18,7 @@ import numpy as np
 from dagbldr.datasets import fetch_babi
 from dagbldr.utils import make_embedding_minibatch, make_minibatch
 from dagbldr.utils import add_embedding_datasets_to_graph, add_datasets_to_graph
-from dagbldr.utils import early_stopping_trainer
+from dagbldr.utils import fixed_n_epochs_trainer
 from dagbldr.utils import get_params_and_grads
 from dagbldr.nodes import gru_recurrent_layer, softmax_layer
 from dagbldr.nodes import embedding_layer, categorical_crossentropy
@@ -82,20 +82,21 @@ predict_function = theano.function(X_story_syms + [X_story_mask_sym] +
                                    X_query_syms + [X_query_mask_sym], [y_pred])
 
 
-def accuracy(*args):
+def error(*args):
     xargs = args[:-1]
     y = args[-1]
-    y_pred = predict_function(*xargs)[0]
-    return np.mean((np.argmax(
+    final_args = xargs
+    y_pred = predict_function(*final_args)[0]
+    return 1 - np.mean((np.argmax(
         y_pred, axis=1).ravel()) == (np.argmax(y, axis=1).ravel()))
 
 checkpoint_dict = {}
-epoch_results = early_stopping_trainer(
-    fit_function, accuracy, checkpoint_dict,
+epoch_results = fixed_n_epochs_trainer(
+    fit_function, error, train_indices, valid_indices, checkpoint_dict,
     [X_story, X_query, y_answer],
-    minibatch_size, train_indices, valid_indices,
+    minibatch_size,
     list_of_minibatch_functions=[make_embedding_minibatch,
                                  make_embedding_minibatch,
                                  make_minibatch],
-    fit_function_output_names=["cost"],
-    cost_function_output_name="valid_cost", n_epochs=100)
+    list_of_train_output_names=["cost"],
+    valid_output_name="valid_error", n_epochs=100)

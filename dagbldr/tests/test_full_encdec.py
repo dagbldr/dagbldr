@@ -82,12 +82,14 @@ def test_conditional_gru_recurrent():
     checkpoint_dict = {}
     train_indices = np.arange(len(X))
     valid_indices = np.arange(len(X))
-    early_stopping_trainer(cost_function, cost_function, checkpoint_dict,
+    early_stopping_trainer(cost_function, cost_function,
+                           train_indices, valid_indices,
+                           checkpoint_dict,
                            [X, y],
-                           minibatch_size, train_indices, valid_indices,
+                           minibatch_size,
                            list_of_minibatch_functions=[text_minibatch_func],
-                           fit_function_output_names=["cost"],
-                           cost_function_output_name="valid_cost",
+                           list_of_train_output_names=["cost"],
+                           valid_output_name="valid_cost",
                            n_epochs=1)
 
 
@@ -139,10 +141,12 @@ def test_conditional_attention_gru_recurrent():
     checkpoint_dict = {}
     train_indices = np.arange(len(X))
     valid_indices = np.arange(len(X))
-    early_stopping_trainer(cost_function, cost_function, checkpoint_dict,
+    early_stopping_trainer(cost_function, cost_function,
+                           train_indices, valid_indices,
+                           checkpoint_dict,
                            [X, y],
-                           minibatch_size, train_indices, valid_indices,
+                           minibatch_size,
                            list_of_minibatch_functions=[text_minibatch_func],
-                           fit_function_output_names=["cost"],
-                           cost_function_output_name="valid_cost",
+                           list_of_train_output_names=["cost"],
+                           valid_output_name="valid_cost",
                            n_epochs=1)

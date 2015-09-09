@@ -236,8 +236,7 @@ def load_last_checkpoint(append_name=None):
     if append_name is not None:
         save_paths = [s.split(append_name)[:-1] + s.split(append_name)[-1:]
                       for s in save_paths]
-    sorted_paths = sorted(save_paths,
-                          key=lambda x: int(x.split(".")[0].split("_")[-1]))
+    sorted_paths = _get_file_matches("*.pkl", "best")
     last_checkpoint_path = sorted_paths[-1]
     print("Loading checkpoint from %s" % last_checkpoint_path)
     return load_checkpoint(last_checkpoint_path)
@@ -260,16 +259,34 @@ def _get_file_matches(glob_ext, append_name):
     else:
         selected = [f for n, f in enumerate(all_files)
                     if append_name in f.split(os.sep)[-1]]
-    selected = sorted(selected, key=lambda x: int(x.split(
-        os.sep)[-1].split(".")[0].split("_")[-1]))
+
+    def key_func(x):
+        return int(x.split(os.sep)[-1].split(".")[0].split("_")[-1])
+
+    int_selected = []
+    for s in selected:
+        try:
+            key_func(s)
+            int_selected.append(s)
+        except ValueError:
+            pass
+
+    selected = sorted(int_selected, key=key_func)
     return selected
+
+
+def argsort(seq):
+    return sorted(range(len(seq)), key=seq.__getitem__)
 
 
 def _remove_old_files(sorted_files_list):
     n_saved_to_keep = NUM_SAVED_TO_KEEP
     if len(sorted_files_list) > n_saved_to_keep:
-        for f in sorted_files_list[:-n_saved_to_keep]:
-            os.remove(f)
+        times = [os.path.getctime(f) for f in sorted_files_list]
+        times_rank = argsort(times)
+        for t, f in zip(times_rank, sorted_files_list):
+            if t not in range(0, len(times))[-n_saved_to_keep:]:
+                os.remove(f)
 
 
 def _cleanup_monitors(partial_match, append_name=None):
@@ -315,7 +332,8 @@ def _archive_dagbldr():
         _zip_dir(lib_dir, save_lib_path)
 
 
-def monitor_status_func(results_dict, append_name=None, status_type="epoch",
+def monitor_status_func(results_dict, append_name=None,
+                        status_type="checkpoint",
                         nan_check=True, print_output=True):
     """ Dump the last results from a results dictionary """
     n_seen = max([len(l) for l in results_dict.values()])
@@ -328,10 +346,8 @@ def monitor_status_func(results_dict, append_name=None, status_type="epoch",
     pp = pprint.PrettyPrinter()
     filename = main.__file__
     fileline = "Script %s" % str(filename)
-    if status_type == "epoch":
-        statusline = "Epoch %i" % n_seen
-    elif status_type == "update":
-        statusline = "Update %i" % n_seen
+    if status_type == "checkpoint":
+        statusline = "Checkpoint %i" % n_seen
     else:
         raise ValueError("Unknown status_type %s" % status_type)
     breakline = "".join(["-"] * (len(statusline) + 1))
@@ -341,12 +357,9 @@ def monitor_status_func(results_dict, append_name=None, status_type="epoch",
         print(statusline)
         print(breakline)
         pp.pprint(last_results)
-    if status_type == "epoch":
+    if status_type == "checkpoint":
         save_path = os.path.join(get_checkpoint_dir(),
                                  "model_checkpoint_%i.html" % n_seen)
-    elif status_type == "update":
-        save_path = os.path.join(get_checkpoint_dir(),
-                                 "model_update_%i.html" % n_seen)
 
     if append_name is not None:
         split = save_path.split("_")
@@ -365,10 +378,8 @@ def monitor_status_func(results_dict, append_name=None, status_type="epoch",
                      if "_auto" not in k]
         _write_results_as_html(results_dict, save_path,
                                default_show=show_keys)
-        if status_type == "epoch":
+        if status_type == "checkpoint":
             _cleanup_monitors("checkpoint", append_name)
-        elif status_type == "update":
-            _cleanup_monitors("update", append_name)
 
 
 def checkpoint_status_func(checkpoint_dict, epoch_results,
@@ -394,38 +405,6 @@ def checkpoint_status_func(checkpoint_dict, epoch_results,
         save_checkpoint(save_path, checkpoint_dict)
         _cleanup_checkpoints(append_name)
     monitor_status_func(epoch_results, append_name=append_name)
-
-
-def early_stopping_status_func(valid_cost, valid_cost_name, checkpoint_dict,
-                               epoch_results):
-    """
-    Adds valid_cost to epoch_results and saves model if best valid
-    Assumes checkpoint_dict is a defaultdict(list)
-
-    Example usage for early stopping on validation set:
-
-    def status_func(status_number, epoch_number, epoch_results):
-        valid_results = iterate_function(
-            cost_function, [X_clean_valid, y_clean_valid], minibatch_size,
-            list_of_output_names=["valid_cost"],
-            list_of_minibatch_functions=[text_minibatcher], n_epochs=1,
-            shuffle=False)
-        early_stopping_status_func(valid_results["valid_cost"][-1],
-                                save_path, checkpoint_dict, epoch_results)
-
-    status_func can then be fed to iterate_function for training with early
-    stopping.
-    """
-    # Quick trick to avoid 0 length list
-    old = min(epoch_results[valid_cost_name] + [np.inf])
-    epoch_results[valid_cost_name].append(valid_cost)
-    new = min(epoch_results[valid_cost_name])
-    if new < old:
-        print("Saving checkpoint based on validation score")
-        checkpoint_status_func(checkpoint_dict, epoch_results,
-                               append_name="best")
-    else:
-        checkpoint_status_func(checkpoint_dict, epoch_results)
 
 
 def default_status_func(status_number, epoch_number, epoch_results):
@@ -522,16 +501,101 @@ def gen_make_list_one_hot_minibatch(n_targets):
     return make_list_one_hot_minibatch
 
 
-def _iterate_function(func, list_of_minibatch_args, minibatch_size,
-                      indices=None, list_of_non_minibatch_args=None,
+def _make_minibatch_from_indices(indices, minibatch_size):
+    if len(indices) % minibatch_size != 0:
+        warnings.warn("WARNING:Length of dataset should be evenly divisible"
+                      "by minibatch_size - slicing to match.", UserWarning)
+        indices = even_slice(indices,
+                             len(indices) - len(indices) % minibatch_size)
+        assert(len(indices) % minibatch_size == 0)
+    minibatch_indices = [indices[i:i + minibatch_size]
+                         for i in np.arange(0, len(indices), minibatch_size)]
+    # Check for contiguity to avoid unnecessary copies
+    minibatch_indices = [slice(mi[0], mi[-1] + 1, 1)
+                         if np.all(
+                             np.abs(np.array(mi) - np.arange(
+                                 mi[0], mi[-1] + 1, 1))
+                             < 1E-8)
+                         else mi
+                         for mi in minibatch_indices]
+    return minibatch_indices
+
+
+def _apply_function_over_minibatch(function, list_of_minibatch_args,
+                                   list_of_minibatch_functions, mi):
+    minibatch_args = []
+    for n, arg in enumerate(list_of_minibatch_args):
+        # list of minibatch_functions can't always be the right size
+        # (enc-dec with mask coming from mb func)
+        r = list_of_minibatch_functions[n](arg, mi)
+        # support embeddings
+        if type(r[0]) is list:
+            minibatch_args += r[0]
+            minibatch_args += r[1:]
+        else:
+            minibatch_args += r
+    all_args = minibatch_args
+    minibatch_results = function(*all_args)
+    if type(minibatch_results) is not list:
+        minibatch_results = [minibatch_results]
+    return minibatch_results
+
+
+def _save_best_functions(train_function, valid_function, optimizer_object=None,
+                         fname="__functions.pkl"):
+    if not _in_nosetest():
+        checkpoint_dir = get_checkpoint_dir()
+        save_path = os.path.join(checkpoint_dir, fname)
+        save_checkpoint(save_path, {"train_function": train_function,
+                                    "valid_function": valid_function,
+                                    "optimizer_object": optimizer_object})
+
+
+def _load_best_functions(fname="__functions.pkl"):
+    if not _in_nosetest():
+        checkpoint_dir = get_checkpoint_dir()
+        save_path = os.path.join(checkpoint_dir, fname)
+        chk = load_checkpoint(save_path)
+        return chk["train_function"], chk["valid_function"], chk["optimizer_object"]
+
+
+def _save_best_results(results, fname="__results.pkl"):
+    if not _in_nosetest():
+        checkpoint_dir = get_checkpoint_dir()
+        save_path = os.path.join(checkpoint_dir, fname)
+        save_checkpoint(save_path, results)
+
+
+def _load_best_results(fname="__results.pkl"):
+    if not _in_nosetest():
+        checkpoint_dir = get_checkpoint_dir()
+        save_path = os.path.join(checkpoint_dir, fname)
+        return load_checkpoint(save_path)
+
+
+def _init_results_dict():
+    results = defaultdict(list)
+    results["total_number_of_updates_auto"] = [0]
+    results["total_number_of_epochs_auto"] = [0]
+    results["current_patience_auto"] = [-1]
+    return results
+
+
+def _iterate_function(train_function, valid_function,
+                      train_indices, valid_indices,
+                      list_of_minibatch_args, minibatch_size,
+                      checkpoint_dict=None,
                       list_of_minibatch_functions=[make_minibatch],
-                      list_of_preprocessing_functions=None,
-                      list_of_output_names=None,
+                      list_of_train_output_names=None,
+                      valid_output_name=None,
                       n_epochs=100,
-                      n_epoch_status=1,
-                      epoch_status_func=default_status_func,
-                      n_minibatch_status=.1,
-                      previous_epoch_results=None,
+                      optimizer_object=None,
+                      validation_frequency="valid_length",
+                      patience_based_stopping=False,
+                      patience_minimum="valid_length",
+                      patience_increase=2,
+                      patience_improvement=0.995,
+                      previous_results=None,
                       shuffle=False, random_state=None,
                       verbose=False):
     """
@@ -556,37 +620,9 @@ def _iterate_function(func, list_of_minibatch_args, minibatch_size,
 
     shuffle and random_state are used to determine if minibatches are run
     in sequence or selected randomly each epoch.
-
-    By far the craziest function in this library.
-
-    Example validation function:
-    n_chars = 84
-    text_minibatcher = gen_text_minibatch_func(n_chars)
-
-    cost_function returns one value, the cost for that minibatch
-
-    valid_results = iterate_function(
-        cost_function, [X_clean_valid, y_clean_valid], minibatch_size,
-        list_of_output_names=["valid_cost"],
-        list_of_minibatch_functions=[text_minibatcher], n_epochs=1,
-        shuffle=False)
-
-    Example training loop:
-
-    fit_function returns 3 values, nll, kl and the total cost
-
-    epoch_results = iterate_function(fit_function, [X, y], minibatch_size,
-                                 list_of_output_names=["nll", "kl", "cost"],
-                                 n_epochs=2000,
-                                 status_func=status_func,
-                                 previous_epoch_results=previous_epoch_results,
-                                 shuffle=True,
-                                 random_state=random_state)
     """
-    if previous_epoch_results is None:
-        epoch_results = defaultdict(list)
-    else:
-        epoch_results = previous_epoch_results
+    if previous_results is None:
+        previous_results = defaultdict(list)
 
     # Input checking and setup
     if shuffle:
@@ -595,64 +631,24 @@ def _iterate_function(func, list_of_minibatch_args, minibatch_size,
     for arg in list_of_minibatch_args:
         assert len(arg) == len(list_of_minibatch_args[0])
 
-    if indices is None:
-        # check if 2D or 3D
-        try:
-            shape = list_of_minibatch_args[0].shape
-            if len(shape) == 2:
-                n_samples = shape[0]
-            elif len(shape) == 3:
-                n_samples = shape[1]
-            else:
-                raise ValueError("Unsupported dimensions for input")
-        except AttributeError:
-            n_samples = len(list_of_minibatch_args[0])
-        indices = np.arange(0, n_samples)
-
     # Bad things happen if this is out of bounds
-    assert indices[-1] < len(list_of_minibatch_args[0])
+    final_index = max(max(train_indices), max(valid_indices))
+    assert final_index < len(list_of_minibatch_args[0])
 
-    if len(indices) % minibatch_size != 0:
-        warnings.warn("WARNING:Length of dataset should be evenly divisible by "
-                      "minibatch_size - slicing to match.", UserWarning)
-        indices = even_slice(indices,
-                             len(indices) - len(indices) % minibatch_size)
-        assert(len(indices) % minibatch_size == 0)
-    minibatch_indices = [indices[i:i + minibatch_size]
-                         for i in np.arange(0, len(indices), minibatch_size)]
-    # Check for contiguous chunks to avoid unnecessary copies
-    minibatch_indices = [slice(mi[0], mi[-1] + 1, 1)
-                         if np.all(np.abs(np.array(mi) -
-                                          np.arange(mi[0], mi[-1] + 1, 1))
-                                   < 1E-8)
-                         else mi
-                         for mi in minibatch_indices]
+    train_minibatch_indices = _make_minibatch_from_indices(train_indices,
+                                                           minibatch_size)
+    valid_minibatch_indices = _make_minibatch_from_indices(valid_indices,
+                                                           minibatch_size)
 
-    if n_epoch_status <= 0:
-        raise ValueError("n_epoch_status must be > 0")
-    elif n_epoch_status < 1:
-        n_epoch_status = int(n_epoch_status * n_epochs)
-        if n_epoch_status < 1:
-            # Update once per epoch
-            n_epoch_status = n_epochs
-    assert n_epoch_status > 0
-    assert n_epochs >= n_epoch_status
-
-    if n_minibatch_status <= 0:
-        raise ValueError("n_minibatch_status must be > 0")
-    elif n_minibatch_status < 1:
-        n_minibatch_status = int(n_minibatch_status * len(minibatch_indices))
-        if n_minibatch_status < 1:
-            # fall back to 1 update
-            n_minibatch_status = len(minibatch_indices)
-    assert n_minibatch_status > 0
-
-    status_points = list(range(n_epochs))
-    if len(status_points) >= n_epoch_status:
-        intermediate_points = status_points[::n_epoch_status]
-        status_points = intermediate_points + [status_points[-1]]
+    if validation_frequency == "valid_length":
+        validation_frequency = len(valid_indices)
     else:
-        status_points = range(len(status_points))
+        assert validation_frequency > 1
+
+    if patience_minimum == "valid_length":
+        patience_minimum = len(valid_indices)
+    else:
+        assert patience_minimum > 1
 
     if len(list_of_minibatch_functions) == 1:
         list_of_minibatch_functions = list_of_minibatch_functions * len(
@@ -660,132 +656,194 @@ def _iterate_function(func, list_of_minibatch_args, minibatch_size,
     else:
         assert len(list_of_minibatch_functions) == len(list_of_minibatch_args)
 
-    if list_of_preprocessing_functions is not None and len(
-      list_of_preprocessing_functions) == 1:
-        list_of_preprocessing_functions = list_of_preprocessing_functions * len(
-            list_of_minibatch_args)
-    elif list_of_preprocessing_functions is not None:
-        assert len(list_of_preprocessing_functions) == len(
-            list_of_minibatch_args)
-    else:
-        assert list_of_preprocessing_functions is None
-
     # Function loop
     global_start = time.time()
     if not _in_nosetest():
         _archive_dagbldr()
-    if len(epoch_results.keys()) != 0:
-        last_update_count = epoch_results[
+        # add calling commandline arguments here...
+
+    if len(previous_results.keys()) != 0:
+        last_update_count = previous_results[
             "total_number_of_updates_auto"][-1]
-        last_epoch_count = epoch_results["total_number_of_epochs_auto"][-1]
+        last_epoch_count = previous_results["total_number_of_epochs_auto"][-1]
     else:
         last_update_count = 0
         last_epoch_count = 0
+
+    if len(previous_results.keys()) != 0:
+        old_patience = previous_results["current_patience_auto"][-1]
+        patience = patience_increase * old_patience
+    else:
+        patience = patience_minimum
+    done_looping = False
+    results = _init_results_dict()
     for e in range(n_epochs):
+        if patience_based_stopping and done_looping:
+            break
         epoch_start = time.time()
-        results = defaultdict(list)
         if shuffle:
-            random_state.shuffle(minibatch_indices)
-        for minibatch_count, mi in enumerate(minibatch_indices):
-            minibatch_args = []
-            for n, arg in enumerate(list_of_minibatch_args):
-                if list_of_preprocessing_functions is not None:
-                    minibatch_args += [list_of_preprocessing_functions[n](
-                        *list_of_minibatch_functions[n](arg, mi))]
+            random_state.shuffle(train_minibatch_indices)
+
+        for minibatch_count, mi in enumerate(train_minibatch_indices):
+            train_minibatch_results = _apply_function_over_minibatch(
+                train_function, list_of_minibatch_args,
+                list_of_minibatch_functions, mi)
+            for n, k in enumerate(train_minibatch_results):
+                if list_of_train_output_names is not None:
+                    assert len(list_of_train_output_names) == len(
+                        train_minibatch_results)
+                    results[list_of_train_output_names[n]].append(
+                        train_minibatch_results[n])
                 else:
-                    # list of minibatch_functions can't always be the right size
-                    # (enc-dec with mask coming from mb func)
-                    r = list_of_minibatch_functions[n](arg, mi)
-                    # support embeddings
-                    if type(r[0]) is list:
-                        minibatch_args += r[0]
-                        minibatch_args += r[1:]
+                    results[n].append(train_minibatch_results[n])
+            # this assumes mi is a slice object... which is *almost* always true
+            new_update_count = last_update_count + (mi.stop - mi.start)
+            if (new_update_count % validation_frequency) <= (
+               last_update_count % validation_frequency):
+                # Validation and monitoring here...
+                print("Computing validation at update %i" % last_update_count)
+                valid_results = defaultdict(list)
+                for minibatch_count, mi in enumerate(valid_minibatch_indices):
+                    valid_minibatch_results = _apply_function_over_minibatch(
+                        valid_function, list_of_minibatch_args,
+                        list_of_minibatch_functions, mi)
+                    valid_results[valid_output_name] += valid_minibatch_results
+
+                # Monitoring output
+                output = {r: np.mean(results[r]) for r in results.keys()}
+                output["total_number_of_updates_auto"] = (
+                    last_update_count + minibatch_count)
+                output["current_patience_auto"] = patience
+                valid_cost = np.mean(valid_results[valid_output_name])
+                epoch_stop = time.time()
+                output["minibatch_size_auto"] = minibatch_size
+                output["train_minibatch_count_auto"] = len(
+                    train_minibatch_indices)
+                output["valid_minibatch_count_auto"] = len(
+                    valid_minibatch_indices)
+                output["train_sample_count_auto"] = len(train_indices)
+                output["valid_sample_count_auto"] = len(valid_indices)
+                output["start_time_s_auto"] = global_start
+                output["this_epoch_time_s_auto"] = epoch_stop - epoch_start
+                output["total_number_of_epochs_auto"] = e + 1 + last_epoch_count
+                for k in output.keys():
+                    previous_results[k].append(output[k])
+
+                if checkpoint_dict is not None:
+                    # Quick trick to avoid 0 length list
+                    old = min(previous_results[valid_output_name] + [np.inf])
+                    previous_results[valid_output_name].append(valid_cost)
+                    new = min(previous_results[valid_output_name])
+                    if new < old:
+                        print("Saving checkpoint based on validation score")
+                        checkpoint_status_func(checkpoint_dict,
+                                               previous_results,
+                                               append_name="best")
+                        _save_best_functions(train_function, valid_function,
+                                             optimizer_object)
+                        _save_best_results(previous_results)
+                        if new < old * patience_improvement:
+                            patience = max(patience,
+                                           new_update_count * patience_increase)
                     else:
-                        minibatch_args += r
-            if list_of_non_minibatch_args is not None:
-                all_args = minibatch_args + list_of_non_minibatch_args
-            else:
-                all_args = minibatch_args
-            minibatch_results = func(*all_args)
-            if type(minibatch_results) is not list:
-                minibatch_results = [minibatch_results]
-            for n, k in enumerate(minibatch_results):
-                if list_of_output_names is not None:
-                    assert len(list_of_output_names) == len(minibatch_results)
-                    results[list_of_output_names[n]].append(
-                        minibatch_results[n])
-                else:
-                    results[n].append(minibatch_results[n])
-            if minibatch_count % n_minibatch_status == 0:
-                print("minibatch %i/%i" % (minibatch_count,
-                                           len(minibatch_indices) - 1))
-                monitor_status_func(results, status_type="update",
-                                    print_output=verbose)
-        epoch_stop = time.time()
-        output = {r: np.mean(results[r]) for r in results.keys()}
-        output["minibatch_size_auto"] = minibatch_size
-        output["minibatch_count_auto"] = len(minibatch_indices)
-        output["start_time_s_auto"] = global_start
-        output["number_of_samples_auto"] = len(
-            minibatch_indices) * minibatch_size
-        output["mean_minibatch_time_s_auto"] = (
-            epoch_stop - epoch_start) / float(minibatch_count + 1)
-        output["mean_sample_time_s_auto"] = (epoch_stop - epoch_start) / float(
-            len(list_of_minibatch_args[0]) * (minibatch_count + 1))
-        output["this_epoch_time_s_auto"] = epoch_stop - epoch_start
-        output["total_number_of_updates_auto"] = (
-            e + 1) * (minibatch_count + 1) + last_update_count
-        output["total_number_of_epochs_auto"] = e + 1 + last_epoch_count
-        for k in output.keys():
-            epoch_results[k].append(output[k])
-        if e in status_points:
-            if epoch_status_func is not None:
-                epoch_number = e
-                status_number = np.searchsorted(status_points, e)
-                epoch_status_func(status_number, epoch_number, epoch_results)
-    return epoch_results
+                        checkpoint_status_func(checkpoint_dict,
+                                               previous_results)
+                results = _init_results_dict()
+            last_update_count = new_update_count
+            if last_update_count > patience:
+                done_looping = True
+        last_update_count += len(train_minibatch_indices)
+    return previous_results
 
 
-def early_stopping_trainer(fit_function, cost_function,
+def fixed_n_epochs_trainer(train_function, valid_function,
+                           train_indices, valid_indices,
                            checkpoint_dict,
-                           list_of_minibatch_args,
-                           minibatch_size, train_indices, valid_indices,
+                           list_of_minibatch_args, minibatch_size,
                            list_of_minibatch_functions=[make_minibatch],
-                           fit_function_output_names=None,
-                           cost_function_output_name=None,
-                           list_of_non_minibatch_args=None,
-                           list_of_preprocessing_functions=None,
-                           n_epochs=100, n_epoch_status=1,
-                           n_minibatch_status=.1, previous_epoch_results=None,
+                           list_of_train_output_names=None,
+                           valid_output_name=None,
+                           n_epochs=1000,
+                           optimizer_object=None,
+                           previous_results=None,
                            shuffle=False, random_state=None,
                            verbose=False):
-    """
-    cost_function should have 1 output
-    cost_function_output_name sthould be a string
-    fit_function can be any fit function
-    fit_function_names should be a list of names to map to fit_function outputs
-    """
-    def status_func(status_number, epoch_number, epoch_results):
-        valid_results = _iterate_function(
-            cost_function, list_of_minibatch_args,
-            minibatch_size,
-            list_of_non_minibatch_args=list_of_non_minibatch_args,
-            indices=valid_indices,
-            epoch_status_func=None,
-            list_of_minibatch_functions=list_of_minibatch_functions,
-            list_of_output_names=[cost_function_output_name], n_epochs=1,
-            verbose=verbose)
-        early_stopping_status_func(
-            valid_results[cost_function_output_name][-1],
-            cost_function_output_name,
-            checkpoint_dict, epoch_results)
 
     epoch_results = _iterate_function(
-        fit_function, list_of_minibatch_args, minibatch_size,
-        indices=train_indices,
+        train_function, valid_function,
+        train_indices, valid_indices,
+        list_of_minibatch_args, minibatch_size,
+        checkpoint_dict=checkpoint_dict,
         list_of_minibatch_functions=list_of_minibatch_functions,
-        list_of_output_names=fit_function_output_names,
-        previous_epoch_results=previous_epoch_results,
-        epoch_status_func=status_func, n_epoch_status=n_epoch_status,
-        n_epochs=n_epochs, verbose=verbose)
-    return epoch_results
+        list_of_train_output_names=list_of_train_output_names,
+        valid_output_name=valid_output_name,
+        n_epochs=n_epochs,
+        optimizer_object=optimizer_object,
+        patience_based_stopping=False,
+        previous_results=previous_results,
+        shuffle=shuffle,
+        random_state=random_state,
+        verbose=verbose)
+    train_function, valid_function, opt = _load_best_functions()
+    previous_results = _load_best_results()
+    checkpoint_dict = load_last_checkpoint("best")
+    return previous_results
+
+
+def early_stopping_trainer(train_function, valid_function,
+                           train_indices, valid_indices,
+                           checkpoint_dict,
+                           list_of_minibatch_args, minibatch_size,
+                           list_of_minibatch_functions=[make_minibatch],
+                           list_of_train_output_names=None,
+                           valid_output_name=None,
+                           n_epochs=1000,
+                           optimizer_object=None,
+                           previous_results=None,
+                           shuffle=False, random_state=None,
+                           verbose=False):
+
+    if optimizer_object is not None:
+        n_halvings = 3
+        assert hasattr(optimizer_object, 'learning_rate')
+    else:
+        n_halvings = 1
+
+    if previous_results is None:
+        previous_results = defaultdict(list)
+    for i in range(n_halvings):
+        epoch_results = _iterate_function(
+            train_function, valid_function,
+            train_indices, valid_indices,
+            list_of_minibatch_args, minibatch_size,
+            checkpoint_dict=checkpoint_dict,
+            list_of_minibatch_functions=list_of_minibatch_functions,
+            list_of_train_output_names=list_of_train_output_names,
+            valid_output_name=valid_output_name,
+            n_epochs=n_epochs,
+            optimizer_object=optimizer_object,
+            patience_based_stopping=True,
+            previous_results=previous_results,
+            shuffle=shuffle,
+            random_state=random_state,
+            verbose=verbose)
+        if not _in_nosetest():
+            train_function, valid_function, opt = _load_best_functions()
+            if opt is not None:
+                optimizer_object = opt
+            previous_results = _load_best_results()
+            checkpoint_dict = load_last_checkpoint("best")
+            if optimizer_object is not None:
+                old_lr = optimizer_object.learning_rate.get_value()
+                if len(previous_results["learning_rate_auto"]) == 0:
+                    previous_results["learning_rate_auto"] = [old_lr] * len(
+                        previous_results["current_patience_auto"])
+                else:
+                    old_length = len(previous_results["learning_rate_auto"])
+                    new_length = len(previous_results["current_patience_auto"])
+                    previous_results["learning_rate_auto"] += [old_lr] * (
+                        new_length - old_length)
+                optimizer_object.learning_rate.set_value(old_lr / 2.)
+            # final checkpoint
+            checkpoint_status_func(checkpoint_dict, previous_results)
+    return previous_results

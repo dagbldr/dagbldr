@@ -80,8 +80,8 @@ cost = base_cost + alpha * err
 params, grads = get_params_and_grads(graph, cost)
 
 learning_rate = 0.0002
-opt = adam(params)
-updates = opt.updates(params, grads, learning_rate)
+opt = adam(params, learning_rate)
+updates = opt.updates(params, grads)
 
 # Checkpointing
 try:
@@ -91,7 +91,7 @@ try:
     predict_function = checkpoint_dict["predict_function"]
     encode_function = checkpoint_dict["encode_function"]
     decode_function = checkpoint_dict["decode_function"]
-    previous_epoch_results = checkpoint_dict["previous_epoch_results"]
+    previous_results = checkpoint_dict["previous_epoch_results"]
 except KeyError:
     fit_function = theano.function([X_sym, y_sym], [nll, kl, nll + kl],
                                    updates=updates)
@@ -105,12 +105,14 @@ except KeyError:
     checkpoint_dict["predict_function"] = predict_function
     checkpoint_dict["encode_function"] = encode_function
     checkpoint_dict["decode_function"] = decode_function
-    previous_epoch_results = None
+    previous_results = None
 
 epoch_results = early_stopping_trainer(
-    fit_function, cost_function, checkpoint_dict, [X, y],
-    minibatch_size, train_indices, valid_indices,
-    fit_function_output_names=["nll", "kl", "lower_bound"],
-    cost_function_output_name="valid_lower_bound",
-    n_epochs=500, previous_epoch_results=previous_epoch_results,
+    fit_function, cost_function, train_indices, valid_indices,
+    checkpoint_dict, [X, y],
+    minibatch_size,
+    list_of_train_output_names=["nll", "kl", "lower_bound"],
+    valid_output_name="valid_lower_bound",
+    n_epochs=500,
+    previous_results=previous_results,
     shuffle=True, random_state=random_state)

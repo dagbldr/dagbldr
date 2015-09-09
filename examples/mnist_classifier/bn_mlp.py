@@ -9,7 +9,7 @@ from dagbldr.utils import add_datasets_to_graph, get_params_and_grads
 from dagbldr.utils import get_weights_from_graph
 from dagbldr.utils import convert_to_one_hot
 from dagbldr.utils import early_stopping_trainer
-from dagbldr.nodes import relu_layer, softmax_zeros_layer
+from dagbldr.nodes import tanh_layer, softmax_zeros_layer
 from dagbldr.nodes import categorical_crossentropy
 
 
@@ -33,7 +33,7 @@ n_hid = 1000
 
 on_off = tensor.iscalar()
 on_off.tag.test_value = 0
-l1 = relu_layer([X_sym], graph, 'l1', proj_dim=n_hid,
+l1 = tanh_layer([X_sym], graph, 'l1', proj_dim=n_hid,
                 batch_normalize=True, mode_switch=on_off,
                 random_state=random_state)
 y_pred = softmax_zeros_layer([l1], graph, 'y_pred',  proj_dim=n_targets)
@@ -47,8 +47,8 @@ params, grads = get_params_and_grads(graph, cost)
 
 learning_rate = 0.1
 momentum = 0.9
-opt = sgd_nesterov(params)
-updates = opt.updates(params, grads, learning_rate, momentum)
+opt = sgd_nesterov(params, learning_rate, momentum)
+updates = opt.updates(params, grads)
 
 fit_function = theano.function([X_sym, y_sym, on_off], [cost], updates=updates)
 cost_function = theano.function([X_sym, y_sym, on_off], [cost])
@@ -57,7 +57,7 @@ checkpoint_dict = {}
 checkpoint_dict["fit_function"] = fit_function
 checkpoint_dict["cost_function"] = cost_function
 checkpoint_dict["predict_function"] = predict_function
-previous_epoch_results = None
+previous_results = None
 
 
 def error(*args):
@@ -73,8 +73,11 @@ def bn_fit_function(X, y):
     return fit_function(X, y, 0)
 
 epoch_results = early_stopping_trainer(
-    bn_fit_function, error, checkpoint_dict, [X, y],
-    minibatch_size, train_indices, valid_indices,
-    fit_function_output_names=["cost"],
-    cost_function_output_name="valid_cost",
-    n_epochs=100, previous_epoch_results=previous_epoch_results)
+    bn_fit_function, error, train_indices, valid_indices,
+    checkpoint_dict, [X, y],
+    minibatch_size,
+    list_of_train_output_names=["train_cost"],
+    valid_output_name="valid_error",
+    n_epochs=1000,
+    optimizer_object=opt,
+    previous_results=previous_results)

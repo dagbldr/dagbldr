@@ -76,8 +76,8 @@ def test_batch_normalization():
                     random_state=random_state)
     f = theano.function([X_sym, on_off], [l2], mode="FAST_COMPILE")
     params, grads = get_params_and_grads(graph, l2.mean())
-    opt = sgd(params)
-    updates = opt.updates(params, grads, .1)
+    opt = sgd(params, .1)
+    updates = opt.updates(params, grads)
     train_f = theano.function([X_sym, on_off], [l2], mode="FAST_COMPILE",
                               updates=updates)
     valid_f = theano.function([X_sym, on_off], [l2], mode="FAST_COMPILE")
@@ -136,8 +136,8 @@ def test_fixed_projection_layer():
     # Test updates
     params, grads = get_params_and_grads(
         graph, final.mean())
-    opt = sgd(params)
-    updates = opt.updates(params, grads, .1)
+    opt = sgd(params, .1)
+    updates = opt.updates(params, grads)
     f2 = theano.function([X_sym], [out2, final],
                          updates=updates)
     ret = f(np.ones_like(X))[0]

@@ -41,8 +41,8 @@ params, grads = get_params_and_grads(graph, cost)
 
 learning_rate = 1E-4
 momentum = 0.95
-opt = rmsprop(params)
-updates = opt.updates(params, grads, learning_rate, momentum)
+opt = rmsprop(params, learning_rate, momentum)
+updates = opt.updates(params, grads)
 
 fit_function = theano.function([X_sym, y_sym], [cost], updates=updates)
 cost_function = theano.function([X_sym, y_sym], [cost])
@@ -51,7 +51,7 @@ checkpoint_dict = {}
 checkpoint_dict["fit_function"] = fit_function
 checkpoint_dict["cost_function"] = cost_function
 checkpoint_dict["predict_function"] = predict_function
-previous_epoch_results = None
+previous_results = None
 
 
 def error(*args):
@@ -62,9 +62,13 @@ def error(*args):
     return 1 - np.mean((np.argmax(
         y_pred, axis=1).ravel()) == (np.argmax(y, axis=1).ravel()))
 
+
 epoch_results = early_stopping_trainer(
-    fit_function, error, checkpoint_dict, [X, y],
-    minibatch_size, train_indices, valid_indices,
-    fit_function_output_names=["cost"],
-    cost_function_output_name="valid_cost",
-    n_epochs=1000, previous_epoch_results=previous_epoch_results)
+    fit_function, error, train_indices, valid_indices,
+    checkpoint_dict, [X, y],
+    minibatch_size,
+    list_of_train_output_names=["train_cost"],
+    valid_output_name="valid_error",
+    n_epochs=1000,
+    optimizer_object=opt,
+    previous_results=previous_results)

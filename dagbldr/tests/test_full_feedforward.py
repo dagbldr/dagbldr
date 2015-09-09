@@ -33,8 +33,8 @@ def test_feedforward_classifier():
     cost = categorical_crossentropy(y_pred, y_sym).mean()
     params, grads = get_params_and_grads(graph, cost)
     learning_rate = 0.001
-    opt = sgd(params)
-    updates = opt.updates(params, grads, learning_rate)
+    opt = sgd(params, learning_rate)
+    updates = opt.updates(params, grads)
 
     fit_function = theano.function([X_sym, y_sym], [cost], updates=updates,
                                    mode="FAST_COMPILE")
@@ -45,11 +45,12 @@ def test_feedforward_classifier():
     checkpoint_dict = {}
     train_indices = np.arange(len(X))
     valid_indices = np.arange(len(X))
-    early_stopping_trainer(fit_function, cost_function, checkpoint_dict, [X, y],
-                           minibatch_size,
+    early_stopping_trainer(fit_function, cost_function,
                            train_indices, valid_indices,
-                           fit_function_output_names=["cost"],
-                           cost_function_output_name="valid_cost",
+                           checkpoint_dict, [X, y],
+                           minibatch_size,
+                           list_of_train_output_names=["cost"],
+                           valid_output_name="valid_cost",
                            n_epochs=1)
 
 
@@ -69,8 +70,8 @@ def test_feedforward_theano_mix():
     cost = categorical_crossentropy(y_pred, y_sym).mean()
     params, grads = get_params_and_grads(graph, cost)
     learning_rate = 0.001
-    opt = sgd(params)
-    updates = opt.updates(params, grads, learning_rate)
+    opt = sgd(params, learning_rate)
+    updates = opt.updates(params, grads)
 
     fit_function = theano.function([X_sym, y_sym], [cost], updates=updates,
                                    mode="FAST_COMPILE")
@@ -81,9 +82,10 @@ def test_feedforward_theano_mix():
     checkpoint_dict = {}
     train_indices = np.arange(len(X))
     valid_indices = np.arange(len(X))
-    early_stopping_trainer(fit_function, cost_function, checkpoint_dict, [X, y],
-                           minibatch_size,
+    early_stopping_trainer(fit_function, cost_function,
                            train_indices, valid_indices,
-                           fit_function_output_names=["cost"],
-                           cost_function_output_name="valid_cost",
+                           checkpoint_dict, [X, y],
+                           minibatch_size,
+                           list_of_train_output_names=["cost"],
+                           valid_output_name="valid_cost",
                            n_epochs=1)

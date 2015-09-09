@@ -27,6 +27,11 @@ def safe_zip(*args):
 
 def as_shared(arr, name=None):
     """ Quick wrapper for theano.shared """
+    if type(arr) in [float, int]:
+        if name is not None:
+            return theano.shared(arr)
+        else:
+            return theano.shared(arr, name=name)
     if name is not None:
         return theano.shared(value=arr, borrow=True)
     else:

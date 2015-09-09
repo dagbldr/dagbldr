@@ -318,6 +318,16 @@ def _archive_dagbldr():
     code_snapshot_dir = os.path.join(checkpoint_dir, "code_snapshot")
     if not os.path.exists(code_snapshot_dir):
         os.mkdir(code_snapshot_dir)
+    try:
+        theano_flags = os.environ["THEANO_FLAGS"]
+        command_string = 'THEANO_FLAGS="' + theano_flags + '" ' + "python "
+        command_string += " ".join(sys.argv)
+    except KeyError:
+        command_string = "python " + " ".join(sys.argv)
+    command_script_path = os.path.join(code_snapshot_dir, "run.sh")
+    if not os.path.exists(command_script_path):
+        with open(command_script_path, 'w') as f:
+            f.writelines(command_string)
     save_script_path = os.path.join(code_snapshot_dir, main.__file__)
     training_utils_dir = inspect.getfile(inspect.currentframe())
     lib_dir = str(os.sep).join(training_utils_dir.split(os.sep)[:-2])

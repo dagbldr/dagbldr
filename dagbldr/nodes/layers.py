@@ -318,6 +318,29 @@ def relu_layer(list_of_inputs, graph, name, proj_dim=None,
         strict=strict, init_func=init_func, func=relu)
 
 
+def maxout_layer(list_of_inputs, graph, name, proj_dim=None,
+                 batch_normalize=False, mode_switch=None,
+                 random_state=None, maxout_rank=2, strict=True,
+                 init_func=np_tanh_fan):
+    assert maxout_rank >= 1
+    assert proj_dim is not None
+    M = projection_layer(
+        list_of_inputs=list_of_inputs, graph=graph, name=name,
+        proj_dim=maxout_rank * proj_dim, batch_normalize=batch_normalize,
+        mode_switch=mode_switch, random_state=random_state,
+        strict=strict, init_func=init_func, func=linear)
+    if M.ndim == 2:
+        dim0, dim1 = M.shape
+        t = M.reshape((dim0, proj_dim, maxout_rank))
+    elif M.ndim == 3:
+        dim0, dim1, dim2 = M.shape
+        t = M.reshape((dim0, dim1, proj_dim, maxout_rank))
+    else:
+        raise ValueError("input ndim not supported for maxout layer")
+    maxout_out = tensor.max(t, axis=t.ndim - 1)
+    return maxout_out
+
+
 def softmax_zeros_layer(list_of_inputs, graph, name, proj_dim=None,
                         strict=True):
     def softmax_init(shape, random_state):

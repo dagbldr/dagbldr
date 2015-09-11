@@ -64,7 +64,7 @@ def categorical_crossentropy(predicted_values, true_values, eps=0.):
         predicted_values. One hot representations can be achieved using
         dagbldr.utils.convert_to_one_hot
 
-    eps : float, default 1E-6
+    eps : float, default 0
         Epsilon to be added during log calculation to avoid NaN values.
 
     Returns
@@ -75,17 +75,20 @@ def categorical_crossentropy(predicted_values, true_values, eps=0.):
     """
     indices = tensor.argmax(true_values, axis=-1)
     rows = tensor.arange(true_values.shape[0])
+    if eps > 0:
+        p = tensor.cast(predicted_values, theano.config.floatX) + eps
+        p /= tensor.sum(p, axis=predicted_values.ndim - 1, keepdims=True)
+    else:
+        p = tensor.cast(predicted_values, theano.config.floatX)
     if predicted_values.ndim < 3:
-        return -tensor.log(tensor.cast(predicted_values + eps,
-                                       theano.config.floatX))[rows, indices]
+        return -tensor.log(p)[rows, indices]
     elif predicted_values.ndim == 3:
         d0 = true_values.shape[0]
         d1 = true_values.shape[1]
-        pred = predicted_values.reshape((d0 * d1, -1))
+        pred = p.reshape((d0 * d1, -1))
         ind = indices.reshape((d0 * d1,))
         s = tensor.arange(pred.shape[0])
-        correct = -tensor.log(tensor.cast(pred + eps,
-                                          theano.config.floatX))[s, ind]
+        correct = -tensor.log(pred)[s, ind]
         return correct.reshape((d0, d1,))
     else:
         raise AttributeError("Tensor dim not supported")

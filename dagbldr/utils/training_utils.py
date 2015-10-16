@@ -185,7 +185,7 @@ def convert_to_one_hot(itr, n_classes, dtype="int32"):
     error_msg = """itr not understood. convert_to_one_hot accepts\n
                    list of list of int, 1D or 2D numpy arrays of\n
                    dtype int32 or int64"""
-    if type(itr) is np.ndarray:
+    if type(itr) is np.ndarray and itr.dtype not in [np.object]:
         if len(itr.shape) == 2:
             is_two_d = True
         if itr.dtype not in [np.int32, np.int64]:
@@ -193,6 +193,8 @@ def convert_to_one_hot(itr, n_classes, dtype="int32"):
     elif not isinstance(itr[0], numbers.Real):
         # Assume list of list
         # iterable of iterable, feature dim must be consistent
+        is_two_d = True
+    elif itr.dtype in [np.object]:
         is_two_d = True
     else:
         raise ValueError(error_msg)
@@ -454,8 +456,44 @@ def make_minibatch(arg, slice_or_indices_list):
         sliced = arg[:, slice_or_indices_list, :]
         return [sliced, np.ones_like(sliced[:, :, 0].astype(
             theano.config.floatX))]
-    else:
+    elif len(arg.shape) == 2:
         return [arg[slice_or_indices_list, :]]
+    else:
+        return [arg[slice_or_indices_list]]
+
+
+def make_masked_minibatch(arg, slice_or_indices_list):
+    """ Create masked minibatches
+        returns list of [arg, mask]
+    """
+    sliced = arg[slice_or_indices_list]
+    is_two_d = True
+    if len(sliced[0].shape) > 1:
+        is_two_d = False
+
+    if is_two_d:
+        d0 = [s.shape[0] for s in sliced]
+        max_len = max(d0)
+        batch_size = len(sliced)
+        data = np.zeros((batch_size, max_len)).astype(sliced[0].dtype)
+        mask = np.zeros((batch_size, max_len)).astype(theano.config.floatX)
+        for n, s in enumerate(sliced):
+            data[n, :len(s)] = s
+            mask[n, :len(s)] = 1
+    else:
+        d0 = [s.shape[0] for s in sliced]
+        d1 = [s.shape[1] for s in sliced]
+        max_len = max(d0)
+        batch_size = len(sliced)
+        dim = d1[0]
+        same_dim = all([d == dim for d in d1])
+        assert same_dim
+        data = np.zeros((max_len, batch_size, dim)).astype(theano.config.floatX)
+        mask = np.zeros((max_len, batch_size)).astype(theano.config.floatX)
+        for n, s in enumerate(sliced):
+            data[:len(s), n] = s
+            mask[:len(s), n] = 1
+    return [data, mask]
 
 
 def make_embedding_minibatch(arg, slice_type):
@@ -480,6 +518,20 @@ def gen_make_one_hot_minibatch(n_targets):
             arg, slice_or_indices_list)[0].squeeze()
         return [convert_to_one_hot(non_one_hot_minibatch, n_targets)]
     return make_one_hot_minibatch
+
+
+def gen_make_masked_one_hot_minibatch(n_targets):
+    """ returns function that returns list """
+    def make_masked_one_hot_minibatch(arg, slice_or_indices_list):
+        non_one_hot_minibatch = make_minibatch(
+            arg, slice_or_indices_list)[0].squeeze()
+        max_len = max([len(i) for i in non_one_hot_minibatch])
+        mask = np.zeros((max_len, len(non_one_hot_minibatch))).astype(
+            theano.config.floatX)
+        for n, i in enumerate(non_one_hot_minibatch):
+            mask[:len(i), n] = 1.
+        return [convert_to_one_hot(non_one_hot_minibatch, n_targets), mask]
+    return make_masked_one_hot_minibatch
 
 
 def gen_make_list_one_hot_minibatch(n_targets):
@@ -594,13 +646,15 @@ def _init_results_dict():
 def _iterate_function(train_function, valid_function,
                       train_indices, valid_indices,
                       list_of_minibatch_args, minibatch_size,
+                      monitor_function=None,
+                      monitor_indices="valid",
                       checkpoint_dict=None,
                       list_of_minibatch_functions=[make_minibatch],
                       list_of_train_output_names=None,
                       valid_output_name=None,
+                      valid_frequency="valid_length",
                       n_epochs=100,
                       optimizer_object=None,
-                      validation_frequency="valid_length",
                       patience_based_stopping=False,
                       patience_minimum="valid_length",
                       patience_increase=2,
@@ -650,10 +704,10 @@ def _iterate_function(train_function, valid_function,
     valid_minibatch_indices = _make_minibatch_from_indices(valid_indices,
                                                            minibatch_size)
 
-    if validation_frequency == "valid_length":
-        validation_frequency = len(valid_indices)
+    if valid_frequency == "valid_length":
+        valid_frequency = len(valid_indices)
     else:
-        assert validation_frequency > 1
+        assert valid_frequency >= 1
 
     if patience_minimum == "valid_length":
         patience_minimum = len(valid_indices)
@@ -673,13 +727,17 @@ def _iterate_function(train_function, valid_function,
         # add calling commandline arguments here...
 
     if len(previous_results.keys()) != 0:
+        last_sample_count = previous_results[
+            "total_number_of_samples_auto"][-1]
         last_update_count = previous_results[
             "total_number_of_updates_auto"][-1]
         last_epoch_count = previous_results["total_number_of_epochs_auto"][-1]
     else:
+        last_sample_count = 0
         last_update_count = 0
         last_epoch_count = 0
 
+    last_valid_count = 0
     if len(previous_results.keys()) != 0:
         old_patience = previous_results["current_patience_auto"][-1]
         patience = patience_increase * old_patience
@@ -688,6 +746,7 @@ def _iterate_function(train_function, valid_function,
     done_looping = False
     results = _init_results_dict()
     for e in range(n_epochs):
+        new_epoch_count = last_epoch_count + 1
         if patience_based_stopping and done_looping:
             break
         epoch_start = time.time()
@@ -706,11 +765,28 @@ def _iterate_function(train_function, valid_function,
                         train_minibatch_results[n])
                 else:
                     results[n].append(train_minibatch_results[n])
-            # this assumes mi is a slice object... which is *almost* always true
-            new_update_count = last_update_count + (mi.stop - mi.start)
-            if (new_update_count % validation_frequency) <= (
-               last_update_count % validation_frequency):
+            # assumes this is a slice object which is *almost* always true
+            new_sample_count = last_sample_count + (mi.stop - mi.start)
+            new_update_count = last_update_count + 1
+            if new_update_count >= (last_valid_count + valid_frequency):
+                last_valid_count = new_update_count
                 # Validation and monitoring here...
+                if monitor_function is not None:
+                    print("Running monitor at update %i" % last_update_count)
+                    if monitor_indices == "valid":
+                        monitor_minibatch_indices = valid_minibatch_indices
+                    elif monitor_indices == "train":
+                        monitor_minibatch_indices = train_minibatch_indices
+                    elif monitor_indices == "full":
+                        monitor_minibatch_indices = train_minibatch_indices
+                        monitor_minibatch_indices += valid_minibatch_indices
+                    else:
+                        raise ValueError("monitor_indices %s not supported" %
+                                         monitor_indices)
+                    for mi in monitor_minibatch_indices:
+                        monitor_results = _apply_function_over_minibatch(
+                            monitor_function, list_of_minibatch_args,
+                            list_of_minibatch_functions, mi)
                 print("Computing validation at update %i" % last_update_count)
                 valid_results = defaultdict(list)
                 for minibatch_count, mi in enumerate(valid_minibatch_indices):
@@ -721,8 +797,8 @@ def _iterate_function(train_function, valid_function,
 
                 # Monitoring output
                 output = {r: np.mean(results[r]) for r in results.keys()}
-                output["total_number_of_updates_auto"] = (
-                    last_update_count + minibatch_count)
+                output["total_number_of_samples_auto"] = new_sample_count
+                output["total_number_of_updates_auto"] = new_update_count
                 output["current_patience_auto"] = patience
                 valid_cost = np.mean(valid_results[valid_output_name])
                 epoch_stop = time.time()
@@ -735,7 +811,7 @@ def _iterate_function(train_function, valid_function,
                 output["valid_sample_count_auto"] = len(valid_indices)
                 output["start_time_s_auto"] = global_start
                 output["this_epoch_time_s_auto"] = epoch_stop - epoch_start
-                output["total_number_of_epochs_auto"] = e + 1 + last_epoch_count
+                output["total_number_of_epochs_auto"] = last_epoch_count + 1
                 for k in output.keys():
                     previous_results[k].append(output[k])
 
@@ -754,15 +830,16 @@ def _iterate_function(train_function, valid_function,
                         _save_best_results(previous_results)
                         if new < old * patience_improvement:
                             patience = max(patience,
-                                           new_update_count * patience_increase)
+                                           new_sample_count * patience_increase)
                     else:
                         checkpoint_status_func(checkpoint_dict,
                                                previous_results)
                 results = _init_results_dict()
             last_update_count = new_update_count
-            if last_update_count > patience:
+            last_sample_count = new_sample_count
+            if last_sample_count > patience:
                 done_looping = True
-        last_update_count += len(train_minibatch_indices)
+        last_epoch_count = new_epoch_count
     return previous_results
 
 
@@ -770,9 +847,12 @@ def fixed_n_epochs_trainer(train_function, valid_function,
                            train_indices, valid_indices,
                            checkpoint_dict,
                            list_of_minibatch_args, minibatch_size,
+                           monitor_function=None,
+                           monitor_indices="valid",
                            list_of_minibatch_functions=[make_minibatch],
                            list_of_train_output_names=None,
                            valid_output_name=None,
+                           valid_frequency="valid_length",
                            n_epochs=1000,
                            optimizer_object=None,
                            previous_results=None,
@@ -783,10 +863,13 @@ def fixed_n_epochs_trainer(train_function, valid_function,
         train_function, valid_function,
         train_indices, valid_indices,
         list_of_minibatch_args, minibatch_size,
+        monitor_function=monitor_function,
+        monitor_indices=monitor_indices,
         checkpoint_dict=checkpoint_dict,
         list_of_minibatch_functions=list_of_minibatch_functions,
         list_of_train_output_names=list_of_train_output_names,
         valid_output_name=valid_output_name,
+        valid_frequency=valid_frequency,
         n_epochs=n_epochs,
         optimizer_object=optimizer_object,
         patience_based_stopping=False,
@@ -804,9 +887,12 @@ def early_stopping_trainer(train_function, valid_function,
                            train_indices, valid_indices,
                            checkpoint_dict,
                            list_of_minibatch_args, minibatch_size,
+                           monitor_function=None,
+                           monitor_indices="valid",
                            list_of_minibatch_functions=[make_minibatch],
                            list_of_train_output_names=None,
                            valid_output_name=None,
+                           valid_frequency="valid_length",
                            n_epochs=1000,
                            optimizer_object=None,
                            previous_results=None,
@@ -826,10 +912,13 @@ def early_stopping_trainer(train_function, valid_function,
             train_function, valid_function,
             train_indices, valid_indices,
             list_of_minibatch_args, minibatch_size,
+            monitor_function=monitor_function,
+            monitor_indices=monitor_indices,
             checkpoint_dict=checkpoint_dict,
             list_of_minibatch_functions=list_of_minibatch_functions,
             list_of_train_output_names=list_of_train_output_names,
             valid_output_name=valid_output_name,
+            valid_frequency=valid_frequency,
             n_epochs=n_epochs,
             optimizer_object=optimizer_object,
             patience_based_stopping=True,

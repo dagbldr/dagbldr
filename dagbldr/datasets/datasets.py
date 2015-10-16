@@ -4,12 +4,14 @@
 # See https://github.com/jych/cle for a library in this style
 import numpy as np
 from collections import Counter
-from scipy.io import loadmat
+from scipy.io import loadmat, wavfile
 from scipy.linalg import svd
 from functools import reduce
-from ..utils import whitespace_tokenizer
+from ..utils import whitespace_tokenizer, safe_zip
+from .preprocessing_utils import stft
 import string
 import tarfile
+import fnmatch
 import theano
 import zipfile
 import gzip
@@ -22,6 +24,115 @@ except ImportError:
     import pickle
 
 regex = re.compile('[%s]' % re.escape(string.punctuation))
+
+bitmap_characters = np.array([
+    0x0,
+    0x808080800080000,
+    0x2828000000000000,
+    0x287C287C280000,
+    0x81E281C0A3C0800,
+    0x6094681629060000,
+    0x1C20201926190000,
+    0x808000000000000,
+    0x810202010080000,
+    0x1008040408100000,
+    0x2A1C3E1C2A000000,
+    0x8083E08080000,
+    0x81000,
+    0x3C00000000,
+    0x80000,
+    0x204081020400000,
+    0x1824424224180000,
+    0x8180808081C0000,
+    0x3C420418207E0000,
+    0x3C420418423C0000,
+    0x81828487C080000,
+    0x7E407C02423C0000,
+    0x3C407C42423C0000,
+    0x7E04081020400000,
+    0x3C423C42423C0000,
+    0x3C42423E023C0000,
+    0x80000080000,
+    0x80000081000,
+    0x6186018060000,
+    0x7E007E000000,
+    0x60180618600000,
+    0x3844041800100000,
+    0x3C449C945C201C,
+    0x1818243C42420000,
+    0x7844784444780000,
+    0x3844808044380000,
+    0x7844444444780000,
+    0x7C407840407C0000,
+    0x7C40784040400000,
+    0x3844809C44380000,
+    0x42427E4242420000,
+    0x3E080808083E0000,
+    0x1C04040444380000,
+    0x4448507048440000,
+    0x40404040407E0000,
+    0x4163554941410000,
+    0x4262524A46420000,
+    0x1C222222221C0000,
+    0x7844784040400000,
+    0x1C222222221C0200,
+    0x7844785048440000,
+    0x1C22100C221C0000,
+    0x7F08080808080000,
+    0x42424242423C0000,
+    0x8142422424180000,
+    0x4141495563410000,
+    0x4224181824420000,
+    0x4122140808080000,
+    0x7E040810207E0000,
+    0x3820202020380000,
+    0x4020100804020000,
+    0x3808080808380000,
+    0x1028000000000000,
+    0x7E0000,
+    0x1008000000000000,
+    0x3C023E463A0000,
+    0x40407C42625C0000,
+    0x1C20201C0000,
+    0x2023E42463A0000,
+    0x3C427E403C0000,
+    0x18103810100000,
+    0x344C44340438,
+    0x2020382424240000,
+    0x800080808080000,
+    0x800180808080870,
+    0x20202428302C0000,
+    0x1010101010180000,
+    0x665A42420000,
+    0x2E3222220000,
+    0x3C42423C0000,
+    0x5C62427C4040,
+    0x3A46423E0202,
+    0x2C3220200000,
+    0x1C201804380000,
+    0x103C1010180000,
+    0x2222261A0000,
+    0x424224180000,
+    0x81815A660000,
+    0x422418660000,
+    0x422214081060,
+    0x3C08103C0000,
+    0x1C103030101C0000,
+    0x808080808080800,
+    0x38080C0C08380000,
+    0x324C000000,
+], dtype=np.uint64)
+
+bitmap = np.unpackbits(bitmap_characters.view(np.uint8)).reshape(
+    bitmap_characters.shape[0], 8, 8)
+bitmap = bitmap[:, ::-1, :]
+all_vocabulary_chars = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTU"
+all_vocabulary_chars += "VWXYZ[\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
+char_mapping = {c: i for i, c in enumerate(all_vocabulary_chars)}
+
+
+def string_to_character_index(string):
+    return np.asarray([char_mapping[c] for c in string])
 
 
 def get_dataset_dir(dataset_name, data_dir=None, folder=None, create_dir=True):
@@ -282,6 +393,127 @@ def fetch_babi(task_number=2):
             "train_indices": train_indices,
             "valid_indices": valid_indices,
             "vocabulary_size": vocab_size}
+
+
+def check_fetch_fruitspeech():
+    """ Check for fruitspeech data
+
+    Recorded by Hakon Sandsmark
+    """
+    url = "https://dl.dropboxusercontent.com/u/15378192/audio.tar.gz"
+    partial_path = get_dataset_dir("fruitspeech")
+    full_path = os.path.join(partial_path, "audio.tar.gz")
+    if not os.path.exists(partial_path):
+        os.makedirs(partial_path)
+    if not os.path.exists(full_path):
+        download(url, full_path, progress_update_percentage=1)
+    audio_path = os.path.join(partial_path, "audio")
+    if not audio_path:
+        tar = tarfile.open(full_path)
+        os.chdir(partial_path)
+        tar.extractall()
+        tar.close()
+    return audio_path
+
+
+def fetch_fruitspeech():
+    """ Check for fruitspeech data
+
+    Recorded by Hakon Sandsmark
+
+    Returns
+    -------
+    summary : dict
+        A dictionary cantaining data
+
+        summary["data"] : list
+            List of list of ints
+
+        summary["specgrams"] : list
+            List of arrays in (n_frames, n_features) format
+
+        summary["target_names"] : list
+            List of strings
+
+        summary["target"] : list
+            List of list of int
+
+        summary["train_indices"] : array
+            Indices for training samples
+
+        summary["valid_indices"] : array
+            Indices for validation samples
+
+        summary["vocabulary_size"] : int
+            Total vocabulary size
+
+        summary["vocabulary"] : string
+            The whole vocabulary as a string
+    """
+
+    data_path = check_fetch_fruitspeech()
+    audio_matches = []
+    for root, dirnames, filenames in os.walk(data_path):
+        for filename in fnmatch.filter(filenames, '*.wav'):
+            audio_matches.append(os.path.join(root, filename))
+    all_chars = []
+    all_words = []
+    all_data = []
+    all_specgram_data = []
+    for wav_path in audio_matches:
+        # Convert chars to int classes
+        word = wav_path.split(os.sep)[-1][:-6]
+        chars = string_to_character_index(word)
+        fs, d = wavfile.read(wav_path)
+        d = d.astype("int32")
+        # Preprocessing from A. Graves "Towards End-to-End Speech
+        # Recognition"
+        Pxx = 10. * np.log10(np.abs(stft(d, fftsize=128))).astype(
+            theano.config.floatX)
+        all_data.append(d)
+        all_specgram_data.append(Pxx)
+        all_chars.append(chars)
+        all_words.append(word)
+    vocabulary_size = len(all_vocabulary_chars)
+    # Shuffle data
+    all_lists = list(safe_zip(all_data, all_specgram_data, all_chars,
+                              all_words))
+    random_state = np.random.RandomState(1999)
+    random_state.shuffle(all_lists)
+    all_data, all_specgram_data, all_chars, all_words = zip(*all_lists)
+    wordset = list(set(all_words))
+    train_matches = []
+    valid_matches = []
+    for w in wordset:
+        matches = [n for n, i in enumerate(all_words) if i == w]
+        # Hold out ~25% of the data, keeping some of every class
+        train_matches.append(matches[:-4])
+        valid_matches.append(matches[-4:])
+    train_indices = np.array(sorted(
+        [r for i in train_matches for r in i])).astype("int32")
+    valid_indices = np.array(sorted(
+        [r for i in valid_matches for r in i])).astype("int32")
+
+    # reorganize into contiguous blocks
+    def reorg(list_):
+        ret = [list_[i] for i in train_indices] + [
+            list_[i] for i in valid_indices]
+        return np.asarray(ret)
+    all_data = reorg(all_data)
+    all_specgram_data = reorg(all_specgram_data)
+    all_chars = reorg(all_chars)
+    all_words = reorg(all_words)
+    # after reorganizing finalize indices
+    train_indices = np.arange(len(train_indices))
+    valid_indices = np.arange(len(valid_indices)) + len(train_indices)
+    return {"data": all_data,
+            "specgrams": all_specgram_data,
+            "target": all_chars,
+            "target_names": all_words,
+            "train_indices": train_indices,
+            "valid_indices": valid_indices,
+            "vocabulary_size": vocabulary_size,
+            "vocabulary": all_vocabulary_chars}
 
 
 def check_fetch_lovecraft():
@@ -736,3 +968,61 @@ def load_digits():
     target = data[:, -1].astype("int32")
     flat_data = data[:, :-1].astype(theano.config.floatX)
     return {"data": flat_data, "target": target}
+
+
+def make_ocr(list_of_strings):
+    """
+    Create an optical character recognition (OCR) dataset from a list of strings
+
+    n_steps : variable
+    n_samples : len(list_of_strings)
+    n_features : 8
+
+    Returns
+    -------
+    summary : dict
+        A dictionary containing dataset information
+
+        summary["data"] : array, shape (n_steps, n_samples, 8)
+           Array containing list_of_strings, converted to bitmap images
+
+        summary["target"] : array, shape (n_samples, )
+            Array of variable length arrays, containing character indices for
+            strings in list_of_strings
+
+        summary["train_indices"] : array, shape (n_samples, )
+            Indices array of the same length as summary["data"]
+
+        summary["vocabulary"] : string
+           All possible character labels as one long string
+
+        summary["vocabulary_size"] : int
+           len(summary["vocabulary"])
+
+        summary["target_names"] : list
+           list_of_strings stored for ease-of-access
+
+    Notes
+    -----
+    Much of these bitmap utils modified from Shawn Tan
+
+    https://github.com/shawntan/theano-ctc/
+    """
+    def string_to_bitmap(string):
+        return np.hstack(np.array(
+            [bitmap[char_mapping[c]] for c in string])).T[:, ::-1]
+
+    data = []
+    target = []
+    for n, s in enumerate(list_of_strings):
+        X_n = string_to_bitmap(s)
+        y_n = string_to_character_index(s)
+        data.append(X_n)
+        target.append(y_n)
+    data = np.asarray(data)
+    target = np.asarray(target)
+    return {"data": data, "target": target,
+            "train_indices": np.arange(len(list_of_strings)),
+            "vocabulary": all_vocabulary_chars,
+            "vocabulary_size": len(all_vocabulary_chars),
+            "target_names": list_of_strings}

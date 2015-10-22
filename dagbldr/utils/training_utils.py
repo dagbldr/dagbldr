@@ -705,7 +705,7 @@ def _iterate_function(train_function, valid_function,
                                                            minibatch_size)
 
     if valid_frequency == "valid_length":
-        valid_frequency = len(valid_indices)
+        valid_frequency = len(valid_minibatch_indices)
     else:
         assert valid_frequency >= 1
 
@@ -811,7 +811,7 @@ def _iterate_function(train_function, valid_function,
                 output["valid_sample_count_auto"] = len(valid_indices)
                 output["start_time_s_auto"] = global_start
                 output["this_epoch_time_s_auto"] = epoch_stop - epoch_start
-                output["total_number_of_epochs_auto"] = last_epoch_count + 1
+                output["total_number_of_epochs_auto"] = new_epoch_count
                 for k in output.keys():
                     previous_results[k].append(output[k])
 

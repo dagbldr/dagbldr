@@ -1,4 +1,5 @@
 from dagbldr.datasets.dataset_utils import add_memory_swapper
+from dagbldr.utils.test_utils import check_skip_travis
 from numpy.testing import assert_raises, assert_array_equal
 import time
 import tables
@@ -6,6 +7,7 @@ import numpy as np
 
 
 def test_add_memory_swapper():
+    check_skip_travis()
     n_samples = 1000
     n_features0 = 250
     n_features1 = 10

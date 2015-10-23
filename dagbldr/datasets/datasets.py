@@ -408,7 +408,7 @@ def check_fetch_fruitspeech():
     if not os.path.exists(full_path):
         download(url, full_path, progress_update_percentage=1)
     audio_path = os.path.join(partial_path, "audio")
-    if not audio_path:
+    if not os.path.exists(audio_path):
         tar = tarfile.open(full_path)
         os.chdir(partial_path)
         tar.extractall()

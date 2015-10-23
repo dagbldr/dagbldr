@@ -706,6 +706,8 @@ def _iterate_function(train_function, valid_function,
 
     if valid_frequency == "valid_length":
         valid_frequency = len(valid_minibatch_indices)
+    elif valid_frequency == "train_length":
+        valid_frequency = len(train_minibatch_indices)
     else:
         assert valid_frequency >= 1
 

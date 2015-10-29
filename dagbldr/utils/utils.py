@@ -214,6 +214,8 @@ def add_datasets_to_graph(list_of_datasets, list_of_names, graph, strict=True,
                 sym = tensor.matrix()
             elif len(dataset.shape) == 3:
                 sym = tensor.tensor3()
+            elif len(dataset.shape) == 4:
+                sym = tensor.tensor4()
             else:
                 raise ValueError("dataset %s has unsupported shape" % name)
         elif dataset.dtype == "int32":
@@ -223,6 +225,8 @@ def add_datasets_to_graph(list_of_datasets, list_of_names, graph, strict=True,
                 sym = tensor.imatrix()
             elif len(dataset.shape) == 3:
                 sym = tensor.itensor3()
+            elif len(dataset.shape) == 4:
+                sym = tensor.itensor4()
             else:
                 raise ValueError("dataset %s has unsupported shape" % name)
         else:
@@ -353,7 +357,8 @@ def calc_expected_dims(graph, expression):
         random_shapes = [expression_shape(r) for r in all_random]
         all_input_shapes = dataset_shapes + shared_shapes + random_shapes
         # Fake length of 2
-        fake_shapes = [(2,) + s[1:] for s in all_input_shapes]
+        fake_shapes = [(2,) + s[1:] if len(s) <= 3 else s
+                       for s in all_input_shapes]
         all_outputs = [expression]
         fake_dict = dict(zip(all_inputs, fake_shapes))
         calc_shapes = alt_shape_of_variables(all_inputs, all_outputs, fake_dict)

@@ -781,6 +781,7 @@ def fetch_mnist():
 
         summary["data"] : array, shape (70000, 784)
         summary["target"] : array, shape (70000,)
+        summary["images"] : array, shape (70000, 1, 28, 28)
         summary["train_indices"] : array, shape (50000,)
         summary["valid_indices"] : array, shape (10000,)
         summary["test_indices"] : array, shape (10000,)
@@ -796,10 +797,13 @@ def fetch_mnist():
     train_indices = np.arange(0, len(train_set[0]))
     valid_indices = np.arange(0, len(valid_set[0])) + train_indices[-1] + 1
     test_indices = np.arange(0, len(test_set[0])) + valid_indices[-1] + 1
-    return {"data": np.concatenate((train_set[0], valid_set[0], test_set[0]),
-                                   axis=0).astype(theano.config.floatX),
-            "target": np.concatenate((train_set[1], valid_set[1], test_set[1]),
-                                     axis=0).astype(np.int32),
+    data = np.concatenate((train_set[0], valid_set[0], test_set[0]),
+                          axis=0).astype(theano.config.floatX)
+    target = np.concatenate((train_set[1], valid_set[1], test_set[1]),
+                            axis=0).astype(np.int32)
+    return {"data": data,
+            "target": target,
+            "images": data.reshape((len(data), 1, 28, 28)),
             "train_indices": train_indices.astype(np.int32),
             "valid_indices": valid_indices.astype(np.int32),
             "test_indices": test_indices.astype(np.int32)}

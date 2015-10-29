@@ -16,7 +16,8 @@ from dagbldr.nodes import softmax_zeros_layer, maxout_layer
 from dagbldr.nodes import sigmoid_layer, tanh_layer, softplus_layer
 from dagbldr.nodes import exp_layer, relu_layer, dropout_layer
 from dagbldr.nodes import softmax_sample_layer, gaussian_sample_layer
-from dagbldr.nodes import gaussian_log_sample_layer
+from dagbldr.nodes import gaussian_log_sample_layer, conv2d_layer
+from dagbldr.nodes import pool2d_layer
 
 # Common between tests
 digits = load_digits()
@@ -200,6 +201,33 @@ def test_maxout_layer():
     f = theano.function([X_sym, y_sym], [single_o, concat_o],
                         mode="FAST_COMPILE")
     single, concat = f(X, y)
+
+
+def test_conv2d_layer():
+    random_state = np.random.RandomState(42)
+    graph = OrderedDict()
+    # 3 channel mnist
+    X_r = np.random.randn(10, 3, 28, 28).astype(theano.config.floatX)
+    X_sym = add_datasets_to_graph([X_r], ["X"], graph)
+    l1 = conv2d_layer([X_sym], graph, 'l1', 5, random_state=random_state)
+    # test that they can stack as well
+    l2 = conv2d_layer([l1], graph, 'l2', 6, random_state=random_state)
+    f = theano.function([X_sym], [l1, l2], mode="FAST_COMPILE")
+    l1, l2 = f(X_r)
+
+
+def test_pool2d_layer():
+    random_state = np.random.RandomState(42)
+    graph = OrderedDict()
+    # 3 channel mnist
+    X_r = np.random.randn(10, 3, 28, 28).astype(theano.config.floatX)
+    X_sym = add_datasets_to_graph([X_r], ["X"], graph)
+    l1 = conv2d_layer([X_sym], graph, 'l1', 5, random_state=random_state)
+    l2 = pool2d_layer([l1], graph, 'l2')
+    # test that they can stack as well
+    l3 = pool2d_layer([l2], graph, 'l3')
+    f = theano.function([X_sym], [l1, l2, l3], mode="FAST_COMPILE")
+    l1, l2, l3 = f(X_r)
 
 
 def test_softmax_zeros_layer():

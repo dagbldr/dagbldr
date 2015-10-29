@@ -4,8 +4,9 @@ import numpy as np
 from scipy import linalg
 import theano
 from theano import tensor
+from theano.tensor.signal.downsample import max_pool_2d
 from theano.sandbox.rng_mrg import MRG_RandomStreams
-from ..utils import concatenate, as_shared
+from ..utils import concatenate
 from ..utils import calc_expected_dims, names_in_graph, add_arrays_to_graph
 from ..utils import add_fixed_to_graph
 from ..utils import fetch_from_graph, add_random_to_graph
@@ -339,6 +340,52 @@ def maxout_layer(list_of_inputs, graph, name, proj_dim=None,
         raise ValueError("input ndim not supported for maxout layer")
     maxout_out = tensor.max(t, axis=t.ndim - 1)
     return maxout_out
+
+
+def conv2d_layer(list_of_inputs, graph, name, num_feature_maps=None,
+                 kernel_size=(3, 3), batch_normalize=False, mode_switch=None,
+                 random_state=None, strict=True, init_func=np_tanh_fan,
+                 func=relu):
+    W_name = name + '_W'
+    b_name = name + '_b'
+    list_of_names = [W_name, b_name]
+    if batch_normalize is not False:
+        raise ValueError("Batch Normalization not yet implemented")
+    if not names_in_graph(list_of_names, graph):
+        assert num_feature_maps is not None
+        assert random_state is not None
+        assert kernel_size is not None
+        # assumes bc01 format
+        input_channels = int(sum([calc_expected_dims(graph, inp)[1]
+                                  for inp in list_of_inputs]))
+        np_W = init_func((num_feature_maps, input_channels) + kernel_size,
+                         random_state)
+        np_b = np_zeros((num_feature_maps,))
+        np_b = np_b.reshape((num_feature_maps, ))
+        add_arrays_to_graph([np_W, np_b], list_of_names, graph, strict=strict)
+    else:
+        if strict:
+            raise AttributeError(
+                "Name %s already found in graph with strict mode!" % name)
+    conc_input = concatenate(list_of_inputs, graph, name, axis=1)
+    W, b = fetch_from_graph(list_of_names, graph)
+    b = b.dimshuffle('x', 0, 'x', 'x')
+    s = int(np.floor(W.get_value().shape[-1] / 2.))
+    z = tensor.nnet.conv2d(
+        conc_input, W, border_mode='full')[:, :, s:-s, s:-s] + b
+    # TODO: nvidia conv
+    # z = dnn_conv(X, w, border_mode=int(np.floor(w.get_value().shape[-1]/2.)))
+    return func(z)
+
+
+def pool2d_layer(list_of_inputs, graph, name, pool_size=(2, 2),
+                 pool_func="max"):
+    conc_input = concatenate(list_of_inputs, graph, name, axis=1)
+    if pool_func == "max":
+        func = max_pool_2d
+    else:
+        raise ValueError("pool_func %s not supported" % pool_func)
+    return func(conc_input, pool_size)
 
 
 def softmax_zeros_layer(list_of_inputs, graph, name, proj_dim=None,

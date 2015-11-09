@@ -13,19 +13,38 @@ set -e
 export CC=gcc
 export CXX=g++
 
+echo 'List files from cached directories'
+echo 'pip:'
+ls $HOME/.cache/pip
+if [[ -d $HOME/download ]]; then
+    echo 'download'
+    ls $HOME/download
+fi
 
-#if [[ "$DISTRIB" == "conda" ]]; then
 # Deactivate the travis-provided virtual environment and setup a
 # conda-based environment instead
 deactivate
 
 # Use the miniconda installer for faster download / install of conda
 # itself
-wget http://repo.continuum.io/miniconda/Miniconda-latest-Linux-x86_64.sh \
-    -O miniconda.sh
+pushd .
+cd
+mkdir -p download
+cd download
+echo "Cached in $HOME/download :"
+ls -l
+echo
+if [[ ! -f miniconda.sh ]]
+    then
+    wget http://repo.continuum.io/miniconda/Miniconda-3.6.0-Linux-x86_64.sh \
+        -O miniconda.sh
+    fi
 chmod +x miniconda.sh && ./miniconda.sh -b
+cd ..
+echo $(ls /home/travis/m*)
 export PATH=/home/travis/miniconda/bin:$PATH
 conda update --yes conda
+popd
 
 THEANO_COMMIT=bd168a5663ad582b24cee45d284432027e1d790b
 # Configure the conda environment and put it in the path using the

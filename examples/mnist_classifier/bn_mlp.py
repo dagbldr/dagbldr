@@ -8,6 +8,7 @@ from dagbldr.optimizers import sgd_nesterov
 from dagbldr.utils import add_datasets_to_graph, get_params_and_grads
 from dagbldr.utils import get_weights_from_graph
 from dagbldr.utils import convert_to_one_hot
+from dagbldr.utils import create_checkpoint_dict
 from dagbldr.utils import early_stopping_trainer
 from dagbldr.nodes import tanh_layer, softmax_zeros_layer
 from dagbldr.nodes import categorical_crossentropy
@@ -42,7 +43,6 @@ weights = get_weights_from_graph(graph)
 L2 = sum([(w ** 2).sum() for w in weights])
 cost = nll + .0001 * L2
 
-
 params, grads = get_params_and_grads(graph, cost)
 
 learning_rate = 0.1
@@ -53,11 +53,8 @@ updates = opt.updates(params, grads)
 fit_function = theano.function([X_sym, y_sym, on_off], [cost], updates=updates)
 cost_function = theano.function([X_sym, y_sym, on_off], [cost])
 predict_function = theano.function([X_sym, on_off], [y_pred])
-checkpoint_dict = {}
-checkpoint_dict["fit_function"] = fit_function
-checkpoint_dict["cost_function"] = cost_function
-checkpoint_dict["predict_function"] = predict_function
-previous_results = None
+
+checkpoint_dict = create_checkpoint_dict(locals())
 
 
 def error(*args):
@@ -79,5 +76,4 @@ epoch_results = early_stopping_trainer(
     list_of_train_output_names=["train_cost"],
     valid_output_name="valid_error",
     n_epochs=1000,
-    optimizer_object=opt,
-    previous_results=previous_results)
+    optimizer_object=opt)

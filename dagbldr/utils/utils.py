@@ -411,3 +411,29 @@ def get_params_and_grads(graph, cost, verbose=False):
     else:
         grads = tensor.grad(cost, params)
     return params, grads
+
+
+def create_checkpoint_dict(lcls):
+    """
+    Create checkpoint dict that contains all local theano functions
+
+    Example usage:
+        create_checkpoint_dict(locals())
+
+    Parameters
+    ----------
+    lcls : dict
+        A dictionary containing theano.function instances, normally the
+        result of locals()
+
+    Returns
+    -------
+    checkpoint_dict : dict
+        A checkpoint dictionary suitable for passing to a training loop
+
+    """
+    checkpoint_dict = {}
+    for k, v in lcls.items():
+        if isinstance(v, theano.compile.function_module.Function):
+            checkpoint_dict[k] = v
+    return checkpoint_dict

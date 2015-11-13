@@ -6,6 +6,9 @@ from theano import tensor
 from theano.scan_module.scan_utils import infer_shape
 from theano.gof.fg import MissingInputError
 from collections import OrderedDict
+from .training_utils import _get_file_matches, _unpickle
+from .training_utils import _set_shared_variables_in_function
+from .training_utils import get_checkpoint_dir
 
 TAG_ID = "_dagbldr_"
 DATASETS_ID = "__datasets__"
@@ -15,7 +18,7 @@ RANDOM_ID = "__random__"
 def safe_zip(*args):
     """Like zip, but ensures arguments are of same length.
 
-       Borrowed from pylearn2
+       Borrowed from pylearn2 - copied from utils to avoid circular import
     """
     base = len(args[0])
     for i, arg in enumerate(args[1:]):
@@ -432,8 +435,60 @@ def create_checkpoint_dict(lcls):
         A checkpoint dictionary suitable for passing to a training loop
 
     """
+    print("Creating new checkpoint dictionary")
     checkpoint_dict = {}
     for k, v in lcls.items():
         if isinstance(v, theano.compile.function_module.Function):
+            checkpoint_dict[k] = v
+    return checkpoint_dict
+
+
+def create_or_continue_from_checkpoint_dict(lcls, append_name="best"):
+    """
+    Create or load a checkpoint dict that contains all local theano functions
+
+    Example usage:
+        create_or_load_checkpoint_dict(locals(), append_name="best")
+
+    Parameters
+    ----------
+    lcls : dict
+        A dictionary containing theano.function instances, normally the
+        result of locals()
+
+    append_name : string, default "best"
+        The append name to use for the checkpoint
+
+    Returns
+    -------
+    checkpoint_dict : dict
+        A checkpoint dictionary suitable for passing to a training loop
+
+    """
+    sorted_paths = _get_file_matches("*.npz", append_name)
+    if len(sorted_paths) < 1:
+        print("No saved results found in %s, creating!" % get_checkpoint_dir())
+        return create_checkpoint_dict(lcls)
+
+    last_weights_path = sorted_paths[-1]
+    print("Loading in weights from %s" % last_weights_path)
+    last_weights = np.load(last_weights_path)
+
+    checkpoint_dict = {}
+
+    sorted_paths = _get_file_matches("*_results_*.pkl", append_name)
+    last_results_path = sorted_paths[-1]
+    print("Loading in results from %s" % last_results_path)
+
+    checkpoint_dict["previous_results"] = _unpickle(
+        last_results_path)
+
+    for k, v in lcls.items():
+        if isinstance(v, theano.compile.function_module.Function):
+            matches = [name for name in last_weights.keys() if k in name]
+            sorted_matches = sorted(
+                matches, key=lambda x: int(x.split("_")[-1]))
+            matching_values = [last_weights[s] for s in sorted_matches]
+            _set_shared_variables_in_function(v, matching_values)
             checkpoint_dict[k] = v
     return checkpoint_dict

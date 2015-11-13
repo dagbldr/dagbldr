@@ -27,6 +27,19 @@ from .plot_utils import _filled_js_template_from_results_dict
 NUM_SAVED_TO_KEEP = 2
 
 
+def safe_zip(*args):
+    """Like zip, but ensures arguments are of same length.
+
+       Borrowed from pylearn2 - copied from utils to avoid circular import
+    """
+    base = len(args[0])
+    for i, arg in enumerate(args[1:]):
+        if len(arg) != base:
+            raise ValueError("Argument 0 has length %d but argument %d has "
+                             "length %d" % (base, i+1, len(arg)))
+    return zip(*args)
+
+
 def get_checkpoint_dir(checkpoint_dir=None, folder=None, create_dir=True):
     """ Get checkpoint directory path """
     if not checkpoint_dir:
@@ -210,7 +223,7 @@ def convert_to_one_hot(itr, n_classes, dtype="int32"):
     return one_hot
 
 
-def save_checkpoint(save_path, items_dict):
+def _pickle(save_path, items_dict):
     """ Simple wrapper for checkpoint dictionaries """
     old_recursion_limit = sys.getrecursionlimit()
     sys.setrecursionlimit(40000)
@@ -219,7 +232,7 @@ def save_checkpoint(save_path, items_dict):
     sys.setrecursionlimit(old_recursion_limit)
 
 
-def load_checkpoint(save_path):
+def _unpickle(save_path):
     """ Simple pickle wrapper for checkpoint dictionaries """
     old_recursion_limit = sys.getrecursionlimit()
     sys.setrecursionlimit(40000)
@@ -229,12 +242,105 @@ def load_checkpoint(save_path):
     return items_dict
 
 
+def _get_shared_variables_from_function(func):
+    """
+    Get all shared variables out of a compiled Theano function
+
+    Parameters
+    ----------
+    func : theano function
+
+    Returns
+    -------
+    shared_variables : list
+        A list of theano shared variables
+    """
+    shared_variable_indices = [n for n, var in enumerate(func.maker.inputs)
+                               if isinstance(var.variable,
+                                             theano.compile.SharedVariable)]
+    shared_variables = [func.maker.inputs[i].variable
+                        for i in shared_variable_indices]
+    return shared_variables
+
+
+def _get_values_from_function(func):
+    """
+    Get all shared values out of a compiled Theano function
+
+    Parameters
+    ----------
+    func : theano function
+
+    Returns
+    -------
+    list_of_values : list
+        A list of numpy arrays
+    """
+    return [v.get_value() for v in _get_shared_variables_from_function(func)]
+
+
+def _set_shared_variables_in_function(func, list_of_values):
+    """
+    Set all shared variables in a compiled Theano function
+
+    Parameters
+    ----------
+    func : theano function
+
+    list_of_values : list
+        List of numpy arrays to add into shared variables
+    """
+    # TODO : Add checking that sizes are OK
+    shared_variable_indices = [n for n, var in enumerate(func.maker.inputs)
+                               if isinstance(var.variable,
+                                             theano.compile.SharedVariable)]
+    shared_variables = [func.maker.inputs[i].variable
+                        for i in shared_variable_indices]
+    [s.set_value(v) for s, v in safe_zip(shared_variables, list_of_values)]
+
+
+def save_weights(save_weights_path, items_dict):
+    """ Save weights stored in functions contained in items_dict """
+    print("Saving weights to %s" % save_weights_path)
+    weights_dict = {}
+    # k is the function name, v is a theano function
+    for k, v in items_dict.items():
+        if isinstance(v, theano.compile.function_module.Function):
+            # w is all the numpy values from a function
+            w = _get_values_from_function(v)
+            for n, w_v in enumerate(w):
+                weights_dict[k + "_%i" % n] = w_v
+    np.savez(save_weights_path, **weights_dict)
+
+
+def save_results(save_path, results):
+    save_checkpoint(save_path, results)
+
+
+def save_checkpoint(save_path, items_dict):
+    """ Simple wrapper for checkpoint dictionaries """
+    old_recursion_limit = sys.getrecursionlimit()
+    sys.setrecursionlimit(40000)
+    with open(save_path, mode="wb") as f:
+        pickle.dump(items_dict, f, protocol=-1)
+    sys.setrecursionlimit(old_recursion_limit)
+
+
+def load_checkpoint(saved_checkpoint_path):
+    """ Simple pickle wrapper for checkpoint dictionaries """
+    old_recursion_limit = sys.getrecursionlimit()
+    sys.setrecursionlimit(40000)
+    with open(saved_checkpoint_path, mode="rb") as f:
+        items_dict = pickle.load(f)
+    sys.setrecursionlimit(old_recursion_limit)
+    return items_dict
+
+
 def load_last_checkpoint(append_name=None):
     """ Simple pickle wrapper for checkpoint dictionaries """
     save_paths = glob.glob(os.path.join(get_checkpoint_dir(), "*.pkl"))
     if len(save_paths) == 0:
-        # No saved checkpoint, return empty dict
-        return {}
+        raise ValueError("No checkpoint found in %s" % get_checkpoint_dir())
     if append_name is not None:
         save_paths = [s.split(append_name)[:-1] + s.split(append_name)[-1:]
                       for s in save_paths]
@@ -299,6 +405,8 @@ def _cleanup_monitors(partial_match, append_name=None):
 
 def _cleanup_checkpoints(append_name=None):
     selected_checkpoints = _get_file_matches("*.pkl", append_name)
+    _remove_old_files(selected_checkpoints)
+    selected_checkpoints = _get_file_matches("*.npz", append_name)
     _remove_old_files(selected_checkpoints)
 
 
@@ -394,29 +502,38 @@ def monitor_status_func(results_dict, append_name=None,
             _cleanup_monitors("checkpoint", append_name)
 
 
-def checkpoint_status_func(checkpoint_dict, epoch_results,
+def checkpoint_status_func(checkpoint_dict, results,
                            append_name=None, nan_check=True):
     """ Saves a checkpoint dict """
-    checkpoint_dict["previous_epoch_results"] = epoch_results
-    nan_test = [(k, True) for k, e_v in epoch_results.items()
+    checkpoint_dict["previous_results"] = results
+    nan_test = [(k, True) for k, e_v in results.items()
                 for v in e_v if np.isnan(v)]
     if nan_check and len(nan_test) > 0:
         nan_keys = set([tup[0] for tup in nan_test])
         raise ValueError("Found NaN values in the following keys ",
                          "%s, exiting training without saving" % nan_keys)
 
-    n_epochs_seen = max([len(l) for l in epoch_results.values()])
-    save_path = os.path.join(get_checkpoint_dir(),
-                             "model_checkpoint_%i.pkl" % n_epochs_seen)
+    n_seen = max([len(l) for l in results.values()])
+    checkpoint_save_path = os.path.join(
+        get_checkpoint_dir(), "model_checkpoint_%i.pkl" % n_seen)
+    weight_save_path = os.path.join(
+        get_checkpoint_dir(), "model_weights_%i.npz" % n_seen)
+    results_save_path = os.path.join(
+        get_checkpoint_dir(), "model_results_%i.pkl" % n_seen)
     if append_name is not None:
-        split = save_path.split("_")
-        save_path = "_".join(
-            split[:-1] + [append_name] + split[-1:])
+        def mkpath(name):
+            split = name.split("_")
+            return "_".join(split[:-1] + [append_name] + split[-1:])
+        checkpoint_save_path = mkpath(checkpoint_save_path)
+        weight_save_path = mkpath(weight_save_path)
+        results_save_path = mkpath(results_save_path)
     if not _in_nosetest():
         # Don't dump if testing!
-        save_checkpoint(save_path, checkpoint_dict)
+        save_checkpoint(checkpoint_save_path, checkpoint_dict)
+        save_weights(weight_save_path, checkpoint_dict)
+        save_results(results_save_path, results)
         _cleanup_checkpoints(append_name)
-    monitor_status_func(epoch_results, append_name=append_name)
+    monitor_status_func(results, append_name=append_name)
 
 
 def default_status_func(status_number, epoch_number, epoch_results):
@@ -608,31 +725,32 @@ def _save_best_functions(train_function, valid_function, optimizer_object=None,
     if not _in_nosetest():
         checkpoint_dir = get_checkpoint_dir()
         save_path = os.path.join(checkpoint_dir, fname)
-        save_checkpoint(save_path, {"train_function": train_function,
-                                    "valid_function": valid_function,
-                                    "optimizer_object": optimizer_object})
+        _pickle(save_path, {"train_function": train_function,
+                            "valid_function": valid_function,
+                            "optimizer_object": optimizer_object})
 
 
 def _load_best_functions(fname="__functions.pkl"):
     if not _in_nosetest():
         checkpoint_dir = get_checkpoint_dir()
         save_path = os.path.join(checkpoint_dir, fname)
-        chk = load_checkpoint(save_path)
-        return chk["train_function"], chk["valid_function"], chk["optimizer_object"]
+        chk = _unpickle(save_path)
+        return (chk["train_function"], chk["valid_function"],
+                chk["optimizer_object"])
 
 
 def _save_best_results(results, fname="__results.pkl"):
     if not _in_nosetest():
         checkpoint_dir = get_checkpoint_dir()
         save_path = os.path.join(checkpoint_dir, fname)
-        save_checkpoint(save_path, results)
+        _pickle(save_path, results)
 
 
 def _load_best_results(fname="__results.pkl"):
     if not _in_nosetest():
         checkpoint_dir = get_checkpoint_dir()
         save_path = os.path.join(checkpoint_dir, fname)
-        return load_checkpoint(save_path)
+        return _unpickle(save_path)
 
 
 def _init_results_dict():
@@ -685,8 +803,17 @@ def _iterate_function(train_function, valid_function,
     shuffle and random_state are used to determine if minibatches are run
     in sequence or selected randomly each epoch.
     """
-    if previous_results is None:
+    if previous_results is not None:
+        raise ValueError("previous_results argument no longer supported! "
+                         "checkpoint_dict should contain this information.")
+
+    if "previous_results" in checkpoint_dict.keys():
+        previous_results = checkpoint_dict["previous_results"]
+    else:
+        print("previous_results not found in checkpoint_dict.keys() "
+              "creating new storage for previous_results")
         previous_results = defaultdict(list)
+
 
     # Input checking and setup
     if shuffle:
@@ -907,8 +1034,6 @@ def early_stopping_trainer(train_function, valid_function,
     else:
         n_halvings = 1
 
-    if previous_results is None:
-        previous_results = defaultdict(list)
     for i in range(n_halvings):
         epoch_results = _iterate_function(
             train_function, valid_function,

@@ -416,7 +416,7 @@ def get_params_and_grads(graph, cost, verbose=False):
     return params, grads
 
 
-def create_checkpoint_dict(lcls=locals()):
+def create_checkpoint_dict(lcls):
     """
     Create checkpoint dict that contains all local theano functions
 
@@ -425,7 +425,7 @@ def create_checkpoint_dict(lcls=locals()):
 
     Parameters
     ----------
-    lcls : dict, default locals()
+    lcls : dict
         A dictionary containing theano.function instances, normally the
         result of locals()
 
@@ -440,10 +440,12 @@ def create_checkpoint_dict(lcls=locals()):
     for k, v in lcls.items():
         if isinstance(v, theano.compile.function_module.Function):
             checkpoint_dict[k] = v
+    if len(checkpoint_dict.keys()) == 0:
+        raise ValueError("No theano functions in lcls!")
     return checkpoint_dict
 
 
-def create_or_continue_from_checkpoint_dict(lcls=locals(), append_name="best"):
+def create_or_continue_from_checkpoint_dict(lcls, append_name="best"):
     """
     Create or load a checkpoint dict that contains all local theano functions
 

@@ -310,7 +310,11 @@ def save_weights(save_weights_path, items_dict):
             w = _get_values_from_function(v)
             for n, w_v in enumerate(w):
                 weights_dict[k + "_%i" % n] = w_v
-    np.savez(save_weights_path, **weights_dict)
+    if len(weights_dict.keys()) > 0:
+        np.savez(save_weights_path, **weights_dict)
+    else:
+        print("Possible BUG: no theano functions found in items_dict, "
+              "unable to save weights!")
 
 
 def save_results(save_path, results):
@@ -814,8 +818,7 @@ def _iterate_function(train_function, valid_function,
               "creating new storage for previous_results")
         previous_results = defaultdict(list)
 
-
-    # Input checking and setup
+    #  Input checking and setup
     if shuffle:
         assert random_state is not None
 

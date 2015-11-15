@@ -13,42 +13,479 @@ from ..utils import fetch_from_graph, add_random_to_graph
 
 
 def np_zeros(shape):
-    """ Builds a numpy variable filled with zeros """
+    """
+    Builds a numpy variable filled with zeros
+
+    Parameters
+    ----------
+    shape, tuple of ints
+        shape of zeros to initialize
+
+    Returns
+    -------
+    initialized_zeros, array-like
+        Array-like of zeros the same size as shape parameter
+    """
     return np.zeros(shape).astype(theano.config.floatX)
 
 
 def np_ones(shape):
-    """ Builds a numpy variable filled with zeros """
+    """
+    Builds a numpy variable filled with ones
+
+    Parameters
+    ----------
+    shape, tuple of ints
+        shape of ones to initialize
+
+    Returns
+    -------
+    initialized_ones, array-like
+        Array-like of ones the same size as shape parameter
+    """
     return np.ones(shape).astype(theano.config.floatX)
 
 
-def np_rand(shape, random_state):
+def np_uniform(shape, random_state, scale=0.08):
+    """
+    Builds a numpy variable filled with uniform random values
+
+    Parameters
+    ----------
+    shape, tuple of ints or tuple of tuples
+        shape of values to initialize
+        tuple of ints should be single shape
+        tuple of tuples is primarily for convnets and should be of form
+        ((n_in_kernels, kernel_width, kernel_height),
+         (n_out_kernels, kernel_width, kernel_height))
+
+    random_state, numpy.random.RandomState() object
+
+    scale, float (default 0.08)
+        scale to apply to uniform random values from (-1, 1)
+        default of 0.08 results in uniform random values in (-0.08, 0.08)
+
+    Returns
+    -------
+    initialized_uniform, array-like
+        Array-like of uniform random values the same size as shape parameter
+    """
+    if type(shape[0]) is tuple:
+        shp = (shape[1][0], shape[0][0]) + shape[1][1:]
+    else:
+        shp = shape
     # Make sure bounds aren't the same
-    return random_state.uniform(low=-0.08, high=0.08, size=shape).astype(
+    return random_state.uniform(low=-scale, high=scale, size=shp).astype(
         theano.config.floatX)
 
 
-def np_randn(shape, random_state):
-    """ Builds a numpy variable filled with random normal values """
-    return (0.01 * random_state.randn(*shape)).astype(theano.config.floatX)
+def np_normal(shape, random_state, scale=0.01):
+    """
+    Builds a numpy variable filled with normal random values
+
+    Parameters
+    ----------
+    shape, tuple of ints or tuple of tuples
+        shape of values to initialize
+        tuple of ints should be single shape
+        tuple of tuples is primarily for convnets and should be of form
+        ((n_in_kernels, kernel_width, kernel_height),
+         (n_out_kernels, kernel_width, kernel_height))
+
+    random_state, numpy.random.RandomState() object
+
+    scale, float (default 0.01)
+        default of 0.01 results in normal random values with variance 0.01
+
+    Returns
+    -------
+    initialized_normal, array-like
+        Array-like of normal random values the same size as shape parameter
+    """
+    if type(shape[0]) is tuple:
+        shp = (shape[1][0], shape[0][0]) + shape[1][1:]
+    else:
+        shp = shape
+    return (scale * random_state.randn(*shp)).astype(theano.config.floatX)
 
 
-def np_tanh_fan(shape, random_state):
+def np_tanh_fan_uniform(shape, random_state, scale=1.):
+    """
+    Builds a numpy variable filled with random values
+
+    Parameters
+    ----------
+    shape, tuple of ints or tuple of tuples
+        shape of values to initialize
+        tuple of ints should be single shape
+        tuple of tuples is primarily for convnets and should be of form
+        ((n_in_kernels, kernel_width, kernel_height),
+         (n_out_kernels, kernel_width, kernel_height))
+
+    random_state, numpy.random.RandomState() object
+
+    scale, float (default 1.)
+        default of 1. results in normal uniform random values
+        with sqrt(6 / (fan in + fan out)) scale
+
+    Returns
+    -------
+    initialized_fan, array-like
+        Array-like of random values the same size as shape parameter
+
+    References
+    ----------
+    Understanding the difficulty of training deep feedforward neural networks
+        X. Glorot, Y. Bengio
+    """
+    if type(shape[0]) is tuple:
+        kern_sum = np.prod(shape[0]) + np.prod(shape[1])
+        shp = (shape[1][0], shape[0][0]) + shape[1][1:]
+    else:
+        kern_sum = np.sum(shape)
+        shp = shape
     # The . after the 6 is critical! shape has dtype int...
-    bound = np.sqrt(6. / np.sum(shape))
+    bound = scale * np.sqrt(6. / kern_sum)
     return random_state.uniform(low=-bound, high=bound,
-                                size=shape).astype(theano.config.floatX)
+                                size=shp).astype(theano.config.floatX)
 
 
-def np_sigmoid_fan(shape, random_state):
-    return 4 * np_tanh_fan(shape, random_state)
+def np_tanh_fan_normal(shape, random_state, scale=1.):
+    """
+    Builds a numpy variable filled with random values
+
+    Parameters
+    ----------
+    shape, tuple of ints or tuple of tuples
+        shape of values to initialize
+        tuple of ints should be single shape
+        tuple of tuples is primarily for convnets and should be of form
+        ((n_in_kernels, kernel_width, kernel_height),
+         (n_out_kernels, kernel_width, kernel_height))
+
+    random_state, numpy.random.RandomState() object
+
+    scale, float (default 1.)
+        default of 1. results in normal random values
+        with sqrt(2 / (fan in + fan out)) scale
+
+    Returns
+    -------
+    initialized_fan, array-like
+        Array-like of random values the same size as shape parameter
+
+    References
+    ----------
+    Understanding the difficulty of training deep feedforward neural networks
+        X. Glorot, Y. Bengio
+    """
+    # The . after the 2 is critical! shape has dtype int...
+    if type(shape[0]) is tuple:
+        kern_sum = np.prod(shape[0]) + np.prod(shape[1])
+        shp = (shape[1][0], shape[0][0]) + shape[1][1:]
+    else:
+        kern_sum = np.sum(shape)
+        shp = shape
+    var = scale * np.sqrt(2. / kern_sum)
+    return var * random_state.randn(*shp).astype(theano.config.floatX)
 
 
-def np_ortho(shape, random_state):
-    """ Builds a theano variable filled with orthonormal random values """
-    g = random_state.randn(*shape)
-    o_g = linalg.svd(g)[0]
-    return o_g.astype(theano.config.floatX)
+def np_sigmoid_fan_uniform(shape, random_state, scale=4.):
+    """
+    Builds a numpy variable filled with random values
+
+    Parameters
+    ----------
+    shape, tuple of ints or tuple of tuples
+        shape of values to initialize
+        tuple of ints should be single shape
+        tuple of tuples is primarily for convnets and should be of form
+        ((n_in_kernels, kernel_width, kernel_height),
+         (n_out_kernels, kernel_width, kernel_height))
+
+    random_state, numpy.random.RandomState() object
+
+    scale, float (default 4.)
+        default of 4. results in uniform random values
+        with 4 * sqrt(6 / (fan in + fan out)) scale
+
+    Returns
+    -------
+    initialized_fan, array-like
+        Array-like of random values the same size as shape parameter
+
+    References
+    ----------
+    Understanding the difficulty of training deep feedforward neural networks
+        X. Glorot, Y. Bengio
+    """
+    return scale * np_tanh_fan_uniform(shape, random_state)
+
+
+def np_sigmoid_fan_normal(shape, random_state, scale=4.):
+    """
+    Builds a numpy variable filled with random values
+
+    Parameters
+    ----------
+    shape, tuple of ints or tuple of tuples
+        shape of values to initialize
+        tuple of ints should be single shape
+        tuple of tuples is primarily for convnets and should be of form
+        ((n_in_kernels, kernel_width, kernel_height),
+         (n_out_kernels, kernel_width, kernel_height))
+
+    random_state, numpy.random.RandomState() object
+
+    scale, float (default 4.)
+        default of 4. results in normal random values
+        with 4 * sqrt(2 / (fan in + fan out)) scale
+
+    Returns
+    -------
+    initialized_fan, array-like
+        Array-like of random values the same size as shape parameter
+
+    References
+    ----------
+    Understanding the difficulty of training deep feedforward neural networks
+        X. Glorot, Y. Bengio
+    """
+    return scale * np_tanh_fan_normal(shape, random_state)
+
+
+def np_variance_scaled_uniform(shape, random_state, scale=1.):
+    """
+    Builds a numpy variable filled with random values
+
+    Parameters
+    ----------
+    shape, tuple of ints or tuple of tuples
+        shape of values to initialize
+        tuple of ints should be single shape
+        tuple of tuples is primarily for convnets and should be of form
+        ((n_in_kernels, kernel_width, kernel_height),
+         (n_out_kernels, kernel_width, kernel_height))
+
+    random_state, numpy.random.RandomState() object
+
+    scale, float (default 1.)
+        default of 1. results in uniform random values
+        with 1 * sqrt(1 / (n_dims)) scale
+
+    Returns
+    -------
+    initialized_scaled, array-like
+        Array-like of random values the same size as shape parameter
+
+    References
+    ----------
+    Efficient Backprop
+        Y. LeCun, L. Bottou, G. Orr, K. Muller
+
+    """
+    if type(shape[0]) is tuple:
+        shp = (shape[1][0], shape[0][0]) + shape[1][1:]
+        kern_sum = np.prod(shape[0])
+    else:
+        shp = shape
+        kern_sum = shape[0]
+    #  Make sure bounds aren't the same
+    bound = scale * np.sqrt(3. / kern_sum)  # sqrt(3) for std of uniform
+    return random_state.uniform(low=-bound, high=bound, size=shp).astype(
+        theano.config.floatX)
+
+
+def np_variance_scaled_randn(shape, random_state, scale=1.):
+    """
+    Builds a numpy variable filled with random values
+
+    Parameters
+    ----------
+    shape, tuple of ints or tuple of tuples
+        shape of values to initialize
+        tuple of ints should be single shape
+        tuple of tuples is primarily for convnets and should be of form
+        ((n_in_kernels, kernel_width, kernel_height),
+         (n_out_kernels, kernel_width, kernel_height))
+
+    random_state, numpy.random.RandomState() object
+
+    scale, float (default 1.)
+        default of 1. results in normal random values
+        with 1 * sqrt(1 / (n_dims)) scale
+
+    Returns
+    -------
+    initialized_scaled, array-like
+        Array-like of random values the same size as shape parameter
+
+    References
+    ----------
+    Efficient Backprop
+        Y. LeCun, L. Bottou, G. Orr, K. Muller
+    """
+    if type(shape[0]) is tuple:
+        shp = (shape[1][0], shape[0][0]) + shape[1][1:]
+        kern_sum = np.prod(shape[0])
+    else:
+        shp = shape
+        kern_sum = shape[0]
+    # Make sure bounds aren't the same
+    std = scale * np.sqrt(1. / kern_sum)
+    return std * random_state.randn(*shp).astype(theano.config.floatX)
+
+
+def np_deep_scaled_uniform(shape, random_state, scale=1.):
+    """
+    Builds a numpy variable filled with random values
+
+    Parameters
+    ----------
+    shape, tuple of ints or tuple of tuples
+        shape of values to initialize
+        tuple of ints should be single shape
+        tuple of tuples is primarily for convnets and should be of form
+        ((n_in_kernels, kernel_width, kernel_height),
+         (n_out_kernels, kernel_width, kernel_height))
+
+    random_state, numpy.random.RandomState() object
+
+    scale, float (default 1.)
+        default of 1. results in uniform random values
+        with 1 * sqrt(6 / (n_dims)) scale
+
+    Returns
+    -------
+    initialized_deep, array-like
+        Array-like of random values the same size as shape parameter
+
+    References
+    ----------
+    Diving Deep into Rectifiers: Surpassing Human-Level Performance on ImageNet
+        K. He, X. Zhang, S. Ren, J. Sun
+    """
+    if type(shape[0]) is tuple:
+        shp = (shape[1][0], shape[0][0]) + shape[1][1:]
+        kern_sum = np.prod(shape[0])
+    else:
+        shp = shape
+        kern_sum = shape[0]
+    #  Make sure bounds aren't the same
+    bound = scale * np.sqrt(6. / kern_sum)  # sqrt(3) for std of uniform
+    return random_state.uniform(low=-bound, high=bound, size=shp).astype(
+        theano.config.floatX)
+
+
+def np_deep_scaled_normal(shape, random_state, scale=1.):
+    """
+    Builds a numpy variable filled with random values
+
+    Parameters
+    ----------
+    shape, tuple of ints or tuple of tuples
+        shape of values to initialize
+        tuple of ints should be single shape
+        tuple of tuples is primarily for convnets and should be of form
+        ((n_in_kernels, kernel_width, kernel_height),
+         (n_out_kernels, kernel_width, kernel_height))
+
+    random_state, numpy.random.RandomState() object
+
+    scale, float (default 1.)
+        default of 1. results in normal random values
+        with 1 * sqrt(2 / (n_dims)) scale
+
+    Returns
+    -------
+    initialized_deep, array-like
+        Array-like of random values the same size as shape parameter
+
+    References
+    ----------
+    Diving Deep into Rectifiers: Surpassing Human-Level Performance on ImageNet
+        K. He, X. Zhang, S. Ren, J. Sun
+    """
+    if type(shape[0]) is tuple:
+        shp = (shape[1][0], shape[0][0]) + shape[1][1:]
+        kern_sum = np.prod(shape[0])
+    else:
+        shp = shape
+        kern_sum = shape[0]
+    # Make sure bounds aren't the same
+    std = scale * np.sqrt(2. / kern_sum)  # sqrt(3) for std of uniform
+    return std * random_state.randn(*shp).astype(theano.config.floatX)
+
+
+def np_ortho(shape, random_state, scale=1.):
+    """
+    Builds a numpy variable filled with orthonormal random values
+
+    Parameters
+    ----------
+    shape, tuple of ints or tuple of tuples
+        shape of values to initialize
+        tuple of ints should be single shape
+        tuple of tuples is primarily for convnets and should be of form
+        ((n_in_kernels, kernel_width, kernel_height),
+         (n_out_kernels, kernel_width, kernel_height))
+
+    random_state, numpy.random.RandomState() object
+
+    scale, float (default 1.)
+        default of 1. results in orthonormal random values sacled by 1.
+
+    Returns
+    -------
+    initialized_ortho, array-like
+        Array-like of random values the same size as shape parameter
+
+    References
+    ----------
+    Exact solutions to the nonlinear dynamics of learning in deep linear
+    neural networks
+        A. Saxe, J. McClelland, S. Ganguli
+    """
+    if type(shape[0]) is tuple:
+        shp = (shape[1][0], shape[0][0]) + shape[1][1:]
+        flat_shp = (shp[0], np.prd(shp[1:]))
+    else:
+        shp = shape
+        flat_shp = shape
+    g = random_state.randn(*flat_shp)
+    U, S, VT = linalg.svd(g, full_matrices=False)
+    res = U if U.shape == flat_shp else VT  # pick one with the correct shape
+    res = res.reshape(shp)
+    return (scale * res).astype(theano.config.floatX)
+
+
+def np_identity(shape, random_state, scale=0.98):
+    """
+    Identity initialization for square matrices
+
+    Parameters
+    ----------
+    shape, tuple of ints
+        shape of resulting array - shape[0] and shape[1] must match
+
+    random_state, numpy.random.RandomState() object
+
+    scale, float (default 0.98)
+        default of .98 results in .98 * eye initialization
+
+    Returns
+    -------
+    initialized_identity, array-like
+        identity initialized square matrix same size as shape
+
+    References
+    ----------
+    A Simple Way To Initialize Recurrent Networks of Rectified Linear Units
+        Q. Le, N. Jaitly, G. Hinton
+    """
+    assert shape[0] == shape[1]
+    res = np.eye(shape[0])
+    return (scale * res).astype(theano.config.floatX)
 
 
 def softplus(X):
@@ -149,7 +586,7 @@ def fixed_projection_layer(list_of_inputs, transform, graph, name,
 
 
 def embedding_layer(list_of_index_inputs, max_index, proj_dim, graph, name,
-                    random_state=None, strict=True, init_func=np_rand):
+                    random_state=None, strict=True, init_func=np_uniform):
     check_type = any([index_input.dtype != "int32"
                       for index_input in list_of_index_inputs])
     check_dim = any([index_input.ndim != 1
@@ -225,8 +662,8 @@ def _batch_normalization(input_variable, graph, name, mode_switch,
 
 def projection_layer(list_of_inputs, graph, name, proj_dim=None,
                      batch_normalize=False, mode_switch=None,
-                     random_state=None, strict=True, init_func=np_tanh_fan,
-                     func=linear):
+                     random_state=None, strict=True,
+                     init_func=np_tanh_fan_uniform, func=linear):
     W_name = name + '_W'
     b_name = name + '_b'
     list_of_names = [W_name, b_name]
@@ -259,7 +696,7 @@ def projection_layer(list_of_inputs, graph, name, proj_dim=None,
 
 def linear_layer(list_of_inputs, graph, name, proj_dim=None,
                  batch_normalize=False, mode_switch=None,
-                 random_state=None, strict=True, init_func=np_tanh_fan):
+                 random_state=None, strict=True, init_func=np_tanh_fan_uniform):
     return projection_layer(
         list_of_inputs=list_of_inputs, graph=graph, name=name,
         proj_dim=proj_dim, batch_normalize=batch_normalize,
@@ -269,7 +706,8 @@ def linear_layer(list_of_inputs, graph, name, proj_dim=None,
 
 def sigmoid_layer(list_of_inputs, graph, name, proj_dim=None,
                   batch_normalize=False, mode_switch=None,
-                  random_state=None, strict=True, init_func=np_sigmoid_fan):
+                  random_state=None, strict=True,
+                  init_func=np_sigmoid_fan_uniform):
     return projection_layer(
         list_of_inputs=list_of_inputs, graph=graph, name=name,
         proj_dim=proj_dim, batch_normalize=batch_normalize,
@@ -279,7 +717,7 @@ def sigmoid_layer(list_of_inputs, graph, name, proj_dim=None,
 
 def tanh_layer(list_of_inputs, graph, name, proj_dim=None,
                batch_normalize=False, mode_switch=None,
-               random_state=None, strict=True, init_func=np_tanh_fan):
+               random_state=None, strict=True, init_func=np_tanh_fan_uniform):
     return projection_layer(
         list_of_inputs=list_of_inputs, graph=graph, name=name,
         proj_dim=proj_dim, batch_normalize=batch_normalize,
@@ -291,7 +729,7 @@ def tanh_layer(list_of_inputs, graph, name, proj_dim=None,
 def softplus_layer(list_of_inputs, graph, name, proj_dim=None,
                    batch_normalize=False, mode_switch=None,
                    random_state=None, strict=True,
-                   init_func=np_tanh_fan):
+                   init_func=np_tanh_fan_uniform):
     return projection_layer(
         list_of_inputs=list_of_inputs, graph=graph, name=name,
         proj_dim=proj_dim, batch_normalize=batch_normalize,
@@ -301,7 +739,7 @@ def softplus_layer(list_of_inputs, graph, name, proj_dim=None,
 
 def exp_layer(list_of_inputs, graph, name, proj_dim=None,
               batch_normalize=False, mode_switch=None,
-              random_state=None, strict=True, init_func=np_tanh_fan):
+              random_state=None, strict=True, init_func=np_tanh_fan_uniform):
     return projection_layer(
         list_of_inputs=list_of_inputs, graph=graph, name=name,
         proj_dim=proj_dim, batch_normalize=batch_normalize,
@@ -311,7 +749,7 @@ def exp_layer(list_of_inputs, graph, name, proj_dim=None,
 
 def relu_layer(list_of_inputs, graph, name, proj_dim=None,
                batch_normalize=False, mode_switch=None,
-               random_state=None, strict=True, init_func=np_tanh_fan):
+               random_state=None, strict=True, init_func=np_tanh_fan_uniform):
     return projection_layer(
         list_of_inputs=list_of_inputs, graph=graph, name=name,
         proj_dim=proj_dim, batch_normalize=batch_normalize,
@@ -322,7 +760,7 @@ def relu_layer(list_of_inputs, graph, name, proj_dim=None,
 def maxout_layer(list_of_inputs, graph, name, proj_dim=None,
                  batch_normalize=False, mode_switch=None,
                  random_state=None, maxout_rank=2, strict=True,
-                 init_func=np_tanh_fan):
+                 init_func=np_tanh_fan_uniform):
     assert maxout_rank >= 1
     assert proj_dim is not None
     M = projection_layer(
@@ -344,7 +782,7 @@ def maxout_layer(list_of_inputs, graph, name, proj_dim=None,
 
 def conv2d_layer(list_of_inputs, graph, name, num_feature_maps=None,
                  kernel_size=(3, 3), batch_normalize=False, mode_switch=None,
-                 random_state=None, strict=True, init_func=np_tanh_fan,
+                 random_state=None, strict=True, init_func=np_tanh_fan_uniform,
                  func=relu):
     W_name = name + '_W'
     b_name = name + '_b'
@@ -358,10 +796,15 @@ def conv2d_layer(list_of_inputs, graph, name, num_feature_maps=None,
         # assumes bc01 format
         input_channels = int(sum([calc_expected_dims(graph, inp)[1]
                                   for inp in list_of_inputs]))
-        np_W = init_func((num_feature_maps, input_channels) + kernel_size,
-                         random_state)
+        input_width = [calc_expected_dims(graph, inp)[2]
+                       for inp in list_of_inputs][0]
+        input_height = [calc_expected_dims(graph, inp)[3]
+                        for inp in list_of_inputs][0]
+        np_W = init_func(((input_channels, input_width, input_height),
+                          (num_feature_maps, kernel_size[0], kernel_size[1])),
+                         random_state=random_state)
         np_b = np_zeros((num_feature_maps,))
-        np_b = np_b.reshape((num_feature_maps, ))
+        np_b = np_b.reshape((num_feature_maps,))
         add_arrays_to_graph([np_W, np_b], list_of_names, graph, strict=strict)
     else:
         if strict:
@@ -402,7 +845,8 @@ def softmax_zeros_layer(list_of_inputs, graph, name, proj_dim=None,
 
 
 def softmax_layer(list_of_inputs, graph, name, proj_dim=None,
-                  random_state=None, strict=True, init_func=np_tanh_fan):
+                  random_state=None, strict=True,
+                  init_func=np_tanh_fan_uniform):
     return projection_layer(list_of_inputs=list_of_inputs, graph=graph,
                             name=name, proj_dim=proj_dim,
                             random_state=random_state,
@@ -509,7 +953,7 @@ def tanh_recurrent_layer(list_of_inputs, mask, hidden_dim, graph, name,
         conc_input_dim = int(sum([calc_expected_dims(graph, inp)[-1]
                                   for inp in list_of_inputs]))
         shape = (conc_input_dim, hidden_dim)
-        np_W = np_rand(shape, random_state)
+        np_W = np_uniform(shape, random_state)
         np_b = np_zeros((shape[-1],))
         np_U = np_ortho((shape[-1], shape[-1]), random_state)
         add_arrays_to_graph([np_W, np_b, np_U], list_of_names, graph,
@@ -560,9 +1004,9 @@ def gru_recurrent_layer(list_of_inputs, mask, hidden_dim, graph, name,
         conc_input_dim = int(sum([calc_expected_dims(graph, inp)[-1]
                                   for inp in list_of_inputs]))
         shape = (conc_input_dim, hidden_dim)
-        np_W = np.hstack([np_rand(shape, random_state),
-                          np_rand(shape, random_state),
-                          np_rand(shape, random_state)])
+        np_W = np.hstack([np_uniform(shape, random_state),
+                          np_uniform(shape, random_state),
+                          np_uniform(shape, random_state)])
         np_b = np_zeros((3 * shape[1],))
         np_Urz = np.hstack([np_ortho((shape[1], shape[1]), random_state),
                             np_ortho((shape[1], shape[1]), random_state), ])
@@ -669,17 +1113,17 @@ def conditional_gru_recurrent_layer(list_of_outputs, list_of_hiddens,
         assert random_state is not None
         conc_input_dim = calc_expected_dims(graph, input_shifted)[-1]
         shape = (conc_input_dim, hidden_dim)
-        np_W = np.hstack([np_rand(shape, random_state),
-                          np_rand(shape, random_state),
-                          np_rand(shape, random_state)])
+        np_W = np.hstack([np_uniform(shape, random_state),
+                          np_uniform(shape, random_state),
+                          np_uniform(shape, random_state)])
         np_b = np_zeros((3 * shape[1],))
         np_Urz = np.hstack([np_ortho((shape[1], shape[1]), random_state),
                             np_ortho((shape[1], shape[1]), random_state), ])
         np_U = np_ortho((shape[1], shape[1]), random_state)
         context_dim = calc_expected_dims(graph, context)[-1]
-        np_Wg = np_rand((context_dim, 2 * shape[1]), random_state)
+        np_Wg = np_uniform((context_dim, 2 * shape[1]), random_state)
         np_bg = np_zeros((2 * shape[1],))
-        np_Wh = np_rand((context_dim, shape[1]), random_state)
+        np_Wh = np_uniform((context_dim, shape[1]), random_state)
         np_bh = np_zeros((shape[1],))
         list_of_arrays = [np_W, np_b, np_Urz, np_U, np_Wg, np_bg, np_Wh, np_bh]
         add_arrays_to_graph(list_of_arrays, list_of_names, graph, strict=strict)
@@ -780,7 +1224,7 @@ def conditional_attention_gru_recurrent_layer(list_of_outputs, list_of_hiddens,
                      Ws_att_name, Wp_att_name, bp_att_name]
     if not names_in_graph(list_of_names, graph):
         assert random_state is not None
-        np_W = np_rand((conc_input_dim, 3 * conc_hidden_dim), random_state)
+        np_W = np_uniform((conc_input_dim, 3 * conc_hidden_dim), random_state)
         np_b = np_zeros((3 * conc_hidden_dim))
         np_Urz = np.hstack([np_ortho((conc_hidden_dim, conc_hidden_dim),
                                      random_state),
@@ -788,16 +1232,16 @@ def conditional_attention_gru_recurrent_layer(list_of_outputs, list_of_hiddens,
                                      random_state)])
         np_U = np_ortho((conc_hidden_dim, conc_hidden_dim), random_state)
 
-        np_W_context_to_hidden = np_rand((conc_hidden_dim, 2 * conc_hidden_dim),
-                                         random_state)
-        np_W_context_to_candidate = np_rand((conc_hidden_dim, conc_hidden_dim),
-                                            random_state)
+        np_W_context_to_hidden = np_uniform((conc_hidden_dim,
+                                             2 * conc_hidden_dim), random_state)
+        np_W_context_to_candidate = np_uniform((conc_hidden_dim,
+                                                conc_hidden_dim), random_state)
         # Init attention weights
-        np_Wi_att = np_rand((conc_input_dim, conc_hidden_dim), random_state)
+        np_Wi_att = np_uniform((conc_input_dim, conc_hidden_dim), random_state)
         np_Wc_att = np_ortho((conc_hidden_dim, conc_hidden_dim), random_state)
         np_b_att = np_zeros((conc_hidden_dim,))
         np_Ws_att = np_ortho((conc_hidden_dim, conc_hidden_dim), random_state)
-        np_Wp_att = np_rand((conc_hidden_dim, 1), random_state)
+        np_Wp_att = np_uniform((conc_hidden_dim, 1), random_state)
         np_bp_att = np_zeros((1,))
 
         list_of_arrays = [np_W, np_b, np_Urz, np_U,
@@ -908,10 +1352,10 @@ def lstm_recurrent_layer(list_of_inputs, mask, hidden_dim, graph, name,
         conc_input_dim = int(sum([calc_expected_dims(graph, inp)[-1]
                                   for inp in list_of_inputs]))
         shape = (conc_input_dim, hidden_dim)
-        np_W = np.hstack([np_rand(shape, random_state),
-                          np_rand(shape, random_state),
-                          np_rand(shape, random_state),
-                          np_rand(shape, random_state)])
+        np_W = np.hstack([np_uniform(shape, random_state),
+                          np_uniform(shape, random_state),
+                          np_uniform(shape, random_state),
+                          np_uniform(shape, random_state)])
         np_b = np_zeros((4 * shape[1],))
         np_U = np.hstack([np_ortho((shape[1], shape[1]), random_state),
                           np_ortho((shape[1], shape[1]), random_state),

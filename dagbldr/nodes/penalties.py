@@ -195,6 +195,58 @@ def log_gaussian_error(mu_values, log_sigma_values, true_values):
     return nll
 
 
+def _logsumexp(X, axis=None):
+    X_max = tensor.max(X, axis=axis, keepdims=True)
+    z = tensor.log(
+        tensor.sum(tensor.exp(X - X_max), axis=axis, keepdims=True)) + X_max
+    return z.sum(axis=axis)
+
+
+def log_gaussian_mixture_cost(coeff_values, mu_values, log_sigma_values,
+                              true_values):
+    """
+    Gaussian mixture model negative log likelihood compared to true_values.
+
+    Parameters
+    ----------
+    coeff_values : tensor, shape
+        The predicted values out of some layer, normally a softmax layer
+
+    mu_values : tensor, shape
+        The predicted values out of some layer, normally a linear layer
+
+    log_sigma_values : tensor, shape
+        The predicted values out of some layer, normally a linear layer
+
+    true_values : tensor, shape[:-1]
+        Ground truth values. Must be the same shape as mu_values.shape[:-1].
+
+    Returns
+    -------
+    nll : tensor, shape predicted_values.shape[1:]
+        The cost per sample, or per sample per step if 3D
+
+    References
+    ----------
+
+    [1] University of Utah Lectures
+        http://www.cs.utah.edu/~piyush/teaching/gmm.pdf
+
+    [2] Statlect.com
+        http://www.statlect.com/normal_distribution_maximum_likelihood.htm
+
+    """
+    dimshuffler = list(range(true_values.ndim)) + ['x']
+    true_values = true_values.dimshuffle(*dimshuffler)
+    inner = 0.5 * tensor.sqr(true_values - mu_values) / np.exp(
+        2 * log_sigma_values)
+    inner += log_sigma_values + 0.5 * tensor.log(2 * np.pi)
+    inner = -tensor.sum(inner, axis=inner.ndim - 2)
+    nll = -_logsumexp(inner + tensor.log(coeff_values),
+                      axis=coeff_values.ndim - 1)
+    return nll
+
+
 def masked_cost(cost, mask):
     """
     Mask the values from a given cost.

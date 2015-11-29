@@ -238,12 +238,90 @@ def log_gaussian_mixture_cost(coeff_values, mu_values, log_sigma_values,
     """
     dimshuffler = list(range(true_values.ndim)) + ['x']
     true_values = true_values.dimshuffle(*dimshuffler)
-    inner = 0.5 * tensor.sqr(true_values - mu_values) / np.exp(
+    inner = 0.5 * tensor.sqr(true_values - mu_values) / tensor.exp(
         2 * log_sigma_values)
     inner += log_sigma_values + 0.5 * tensor.log(2 * np.pi)
     inner = -tensor.sum(inner, axis=inner.ndim - 2)
     nll = -_logsumexp(inner + tensor.log(coeff_values),
                       axis=coeff_values.ndim - 1)
+    return nll
+
+
+def bernoulli_and_correlated_log_gaussian_mixture_cost(
+    binary_values, coeff_values, mu_values, log_sigma_values, corr_values,
+    true_values):
+    """
+    Bernoulli combined with correlated gaussian mixture model negative log
+    likelihood compared to true_values.
+
+    Based on implementation from Junyoung Chung.
+
+    Parameters
+    ----------
+    coeff_values : tensor, shape
+        The predicted values out of some layer, normally a softmax layer
+
+    mu_values : tensor, shape
+        The predicted values out of some layer, normally a linear layer
+
+    log_sigma_values : tensor, shape
+        The predicted values out of some layer, normally a linear layer
+
+    true_values : tensor, shape[:-1]
+        Ground truth values. Must be the same shape as mu_values.shape[:-1].
+
+    Returns
+    -------
+    nll : tensor, shape predicted_values.shape[1:]
+        The cost per sample, or per sample per step if 3D
+
+    References
+    ----------
+
+    [1] University of Utah Lectures
+        http://www.cs.utah.edu/~piyush/teaching/gmm.pdf
+
+    [2] Statlect.com
+        http://www.statlect.com/normal_distribution_maximum_likelihood.htm
+
+    """
+    dimshuffler = list(range(true_values.ndim)) + ['x']
+    tv = true_values
+    true_values = tv.dimshuffle(*dimshuffler)
+
+    def _subslice(arr, idx):
+        if arr.ndim == 3:
+            return arr[:, idx]
+        raise ValueError("Unsupported ndim %i" % arr.ndim)
+
+    mu_1 = _subslice(mu_values, 0)
+    mu_2 = _subslice(mu_values, 1)
+
+    log_sigma_1 = _subslice(log_sigma_values, 0)
+    log_sigma_2 = _subslice(log_sigma_values, 1)
+
+    true_0 = _subslice(true_values, 0)
+    true_1 = _subslice(true_values, 1)
+    true_2 = _subslice(true_values, 2)
+
+    c_b = tensor.sum(tensor.xlogx.xlogy0(
+        true_0, binary_values) + tensor.xlogx.xlogy0(
+            1 - true_0, 1 - binary_values), axis=binary_values.ndim - 1)
+
+    corr_values = _subslice(corr_values, 0)
+    inner1 = (0.5 * tensor.log(1 - corr_values ** 2) +
+              log_sigma_1 + log_sigma_2 + tensor.log(2 * np.pi))
+
+    z1 = ((true_1 - mu_1) / tensor.exp(2 * log_sigma_1)) ** 2
+    z2 = ((true_2 - mu_2) / tensor.exp(2 * log_sigma_2)) ** 2
+    zr = (2 * corr_values * (true_1 - mu_1) * (true_2 - mu_2)) / (
+        tensor.exp(log_sigma_1 + log_sigma_2))
+    z = z1 + z2 - zr
+
+    inner2 = .5 * (1. / (1. - corr_values ** 2))
+    cost = -(inner1 + z * inner2)
+    nll = -_logsumexp(cost + tensor.log(coeff_values),
+                      axis=coeff_values.ndim - 1) - c_b
     return nll
 
 

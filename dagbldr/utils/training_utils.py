@@ -1009,10 +1009,11 @@ def fixed_n_epochs_trainer(train_function, valid_function,
         shuffle=shuffle,
         random_state=random_state,
         verbose=verbose)
-    train_function, valid_function, opt = _load_best_functions()
-    previous_results = _load_best_results()
-    checkpoint_dict = load_last_checkpoint("best")
-    return previous_results
+    if not _in_nosetest():
+        train_function, valid_function, opt = _load_best_functions()
+        previous_results = _load_best_results()
+        checkpoint_dict = load_last_checkpoint("best")
+        return previous_results
 
 
 def early_stopping_trainer(train_function, valid_function,

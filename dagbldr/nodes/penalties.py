@@ -292,6 +292,8 @@ def bernoulli_and_correlated_log_gaussian_mixture_cost(
     def _subslice(arr, idx):
         if arr.ndim == 3:
             return arr[:, idx]
+        elif arr.ndim == 4:
+            return arr[:, :, idx]
         raise ValueError("Unsupported ndim %i" % arr.ndim)
 
     mu_1 = _subslice(mu_values, 0)

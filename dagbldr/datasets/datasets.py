@@ -1030,3 +1030,205 @@ def make_ocr(list_of_strings):
             "vocabulary": all_vocabulary_chars,
             "vocabulary_size": len(all_vocabulary_chars),
             "target_names": list_of_strings}
+
+
+def check_fetch_iamondb():
+    """ Check for IAMONDB data
+
+        This dataset cannot be downloaded automatically!
+    """
+    partial_path = get_dataset_dir("iamondb")
+    if not os.path.exists(partial_path):
+        os.makedirs(partial_path)
+    ascii_path = os.path.join(partial_path, "lineStrokes-all.tar.gz")
+    lines_path = os.path.join(partial_path, "ascii-all.tar.gz")
+    files_path = os.path.join(partial_path, "task1.tar.gz")
+    for p in [ascii_path, lines_path, files_path]:
+        if not os.path.exists(p):
+            files = "lineStrokes-all.tar.gz, ascii-all.tar.gz, and task1.tar.gz"
+            url = "http://www.iam.unibe.ch/fki/databases/"
+            url += "iam-on-line-handwriting-database/"
+            url += "download-the-iam-on-line-handwriting-database"
+            err = "Path %s does not exist!" % p
+            err += " Download the %s files from %s" % (files, url)
+            err += " and place them in the directory %s" % partial_path
+            raise ValueError(err)
+    return partial_path
+
+
+def fetch_iamondb():
+    from lxml import etree
+    partial_path = check_fetch_iamondb()
+    pickle_path = os.path.join(partial_path, "iamondb_saved.pkl")
+    if not os.path.exists(pickle_path):
+        files_path = os.path.join(partial_path, "task1.tar.gz")
+
+        with tarfile.open(files_path) as tf:
+            train_file = [fname for fname in tf.getnames()
+                          if "trainset" in fname][0]
+
+            def _s(lines):
+                return [l.strip().decode("utf-8") for l in lines]
+
+            f = tf.extractfile(train_file)
+            train_names = _s(f.readlines())
+
+            valid_files = [fname for fname in tf.getnames()
+                           if "testset" in fname]
+            valid_names = []
+            for v in valid_files:
+                f = tf.extractfile(v)
+                valid_names.extend(_s(f.readlines()))
+
+        strokes_path = os.path.join(partial_path, "lineStrokes-all.tar.gz")
+        ascii_path = os.path.join(partial_path, "ascii-all.tar.gz")
+        lsf = tarfile.open(strokes_path)
+        af = tarfile.open(ascii_path)
+        sf = [fs for fs in lsf.getnames() if ".xml" in fs]
+
+        def construct_ascii_path(f):
+            primary_dir = f.split("-")[0]
+            if f[-1].isalpha():
+                sub_dir = f[:-1]
+            else:
+                sub_dir = f
+            file_path = os.path.join("ascii", primary_dir, sub_dir, f + ".txt")
+            return file_path
+
+        def construct_stroke_paths(f):
+            primary_dir = f.split("-")[0]
+            if f[-1].isalpha():
+                sub_dir = f[:-1]
+            else:
+                sub_dir = f
+            files_path = os.path.join("lineStrokes", primary_dir, sub_dir)
+
+            # Dash is crucial to obtain correct match!
+            files = [sif for sif in sf if f in sif]
+            files = sorted(files, key=lambda x: int(
+                x.split(os.sep)[-1].split("-")[-1][:-4]))
+            return files
+
+        train_ascii_files = [construct_ascii_path(fta) for fta in train_names]
+        valid_ascii_files = [construct_ascii_path(fva) for fva in valid_names]
+        train_stroke_files = [construct_stroke_paths(fts)
+                              for fts in train_names]
+        valid_stroke_files = [construct_stroke_paths(fvs)
+                              for fvs in valid_names]
+
+        train_set_files = list(zip(train_stroke_files, train_ascii_files))
+        valid_set_files = list(zip(valid_stroke_files, valid_ascii_files))
+
+        dataset_storage = {}
+        x_set = []
+        y_set = []
+        char_set = []
+        for sn, se in enumerate([train_set_files, valid_set_files]):
+            for n, (strokes_files, ascii_file) in enumerate(se):
+                if n % 100 == 0:
+                    print("Processing file %i of %i" % (n, len(se)))
+                with af.extractfile(ascii_file) as fp:
+                    cleaned = [t.strip().decode("utf-8") for t in fp.readlines()
+                               if t != '\r\n'
+                               and t != ' \n'
+                               and t != '\n'
+                               and t != ' \r\n']
+
+                    # Try using CSR
+                    idx = [w for w, li in enumerate(cleaned) if li == "CSR:"][0]
+                    cleaned_sub = cleaned[idx + 1:]
+                    corrected_sub = []
+
+                    for li in cleaned_sub:
+                        # Handle edge case with %%%%% meaning new line?
+                        if "%" in li:
+                            li2 = re.sub('\%\%+', '%', li).split("%")
+                            li2 = ''.join([l.strip() for l in li2])
+                            corrected_sub.append(li2)
+                        else:
+                            corrected_sub.append(li)
+                    corrected_sub = [c for c in corrected_sub if c != '']
+
+                n_one_hot = 57
+                y = [np.zeros((len(li), n_one_hot), dtype='int16')
+                     for li in corrected_sub]
+
+                # A-Z, a-z, space, apostrophe, comma, period
+                charset = list(range(65, 90 + 1)) + list(range(97, 122 + 1)) + [
+                    32, 39, 44, 46]
+                tmap = {k: w + 1 for w, k in enumerate(charset)}
+
+                # 0 for UNK/other
+                tmap[0] = 0
+
+                def tokenize_ind(line):
+                    t = [ord(c) if ord(c) in charset else 0 for c in line]
+                    r = [tmap[i] for i in t]
+                    return r
+
+                for n, li in enumerate(corrected_sub):
+                    y[n][np.arange(len(li)), tokenize_ind(li)] = 1
+
+                x = []
+                for stroke_file in strokes_files:
+                    with lsf.extractfile(stroke_file) as fp:
+                        tree = etree.parse(fp)
+                        root = tree.getroot()
+                        # Get all the values from the XML
+                        # 0th index is stroke ID, will become up/down
+                        s = np.array([[i, int(Point.attrib['x']),
+                                      int(Point.attrib['y'])]
+                                      for StrokeSet in root
+                                      for i, Stroke in enumerate(StrokeSet)
+                                      for Point in Stroke])
+
+                        # flip y axis
+                        s[:, 2] = -s[:, 2]
+
+                        # Get end of stroke points
+                        c = s[1:, 0] != s[:-1, 0]
+                        nci = np.copy(np.where(c == False)[0]) - 1
+                        nci = nci[nci >= 0]
+                        ci = np.copy(np.where(c == True)[0]) - 1
+                        ci = ci[ci >= 0]
+                        s = s[:-1]
+
+                        # set pen down
+                        s[0, 0] = 0
+                        s[nci, 0] = 0
+
+                        # set pen up
+                        s[ci, 0] = 1
+                        s[-1, 0] = 1
+
+                        x.append(s)
+
+                if len(x) != len(y):
+                    x_t = np.vstack((x[-2], x[-1]))
+                    x = x[:-2] + [x_t]
+
+                if len(x) == len(y):
+                    x_set.extend(x)
+                    y_set.extend(y)
+                    char_set.extend(corrected_sub)
+                else:
+                    print("Skipping %i, couldn't make x and y len match!" % n)
+            if sn == 0:
+                dataset_storage["train_indices"] = np.arange(len(x_set))
+            elif sn == 1:
+                offset = dataset_storage["train_indices"][-1] + 1
+                dataset_storage["valid_indices"] = np.arange(offset, len(x_set))
+                dataset_storage["data"] = np.array(x_set)
+                dataset_storage["target"] = np.array(y_set)
+                dataset_storage["target_phrases"] = char_set
+                dataset_storage["vocabulary_size"] = n_one_hot
+                c = "".join([chr(a) for a in [ord("-")] + charset])
+                dataset_storage["vocabulary"] = c
+            else:
+                raise ValueError("Undefined number of files")
+        f = open(pickle_path, "wb")
+        pickle.dump(dataset_storage, f, -1)
+        f.close()
+    with open(pickle_path, "rb") as f:
+        pickle_dict = pickle.load(f)
+    return pickle_dict

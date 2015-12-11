@@ -6,6 +6,14 @@ from theano import tensor
 from ..utils import as_shared
 
 
+def gradient_clipping(grads, rescale=5.):
+    grad_norm = tensor.sqrt(sum(map(lambda x: tensor.sqr(x).sum(), grads)))
+    scaling_num = rescale
+    scaling_den = tensor.maximum(rescale, grad_norm)
+    scaling = scaling_num / scaling_den
+    return [g * scaling for g in grads]
+
+
 class sgd(object):
     """
     Vanilla SGD

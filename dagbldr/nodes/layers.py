@@ -489,8 +489,8 @@ def np_identity(shape, random_state, scale=0.98):
     return (scale * res).astype(theano.config.floatX)
 
 
-def softplus(X):
-    return tensor.nnet.softplus(X) + 1E-4
+def softplus(X, eps=1E-4):
+    return tensor.nnet.softplus(X) + eps
 
 
 def relu(X):
@@ -821,7 +821,6 @@ def log_gaussian_mixture_layer(list_of_inputs, graph, name, proj_dim=None,
     return coeffs, mus, log_sigmas
 
 
-
 def bernoulli_and_correlated_log_gaussian_mixture_layer(
     list_of_inputs, graph, name, proj_dim=2, batch_normalize=False,
     mode_switch=None, random_state=None, n_components=5, strict=True,
@@ -881,6 +880,67 @@ def bernoulli_and_correlated_log_gaussian_mixture_layer(
     log_sigmas = _reshape(log_sigmas)
     corr = _reshape(corr, calc_corr)
     return binary, coeffs, mus, log_sigmas, corr
+
+
+def bernoulli_and_correlated_gaussian_mixture_layer(
+    list_of_inputs, graph, name, proj_dim=2, batch_normalize=False,
+    mode_switch=None, random_state=None, n_components=5, strict=True,
+    init_func=np_tanh_fan_uniform):
+    assert n_components >= 1
+    assert proj_dim is not None
+
+    def _reshape(l, d=n_components):
+        if d == 1:
+            t = l.dimshuffle(
+                *(list(range(corr.ndim - 1)) + ['x'] + [corr.ndim - 1]))
+            return t
+        if l.ndim == 2:
+            dim0, dim1 = l.shape
+            t = l.reshape((dim0, proj_dim, d))
+        elif l.ndim == 3:
+            dim0, dim1, dim2 = l.shape
+            t = l.reshape((dim0, dim1, proj_dim, d))
+        else:
+            raise ValueError("input ndim not supported for gaussian "
+                             "mixture layer")
+        return t
+    assert proj_dim == 2
+    mus = projection_layer(
+        list_of_inputs=list_of_inputs, graph=graph,
+        name=name + "_mus", proj_dim=n_components * proj_dim,
+        batch_normalize=batch_normalize,
+        mode_switch=mode_switch, random_state=random_state,
+        strict=strict, init_func=init_func, func=linear)
+    sigmas = projection_layer(
+        list_of_inputs=list_of_inputs, graph=graph,
+        name=name + "_sigmas", proj_dim=n_components * proj_dim,
+        batch_normalize=batch_normalize,
+        mode_switch=mode_switch,
+        random_state=random_state, strict=strict,
+        init_func=init_func, func=softplus)
+    coeffs = softmax_layer(
+        list_of_inputs=list_of_inputs, graph=graph, name=name + "_coeffs",
+        proj_dim=n_components, random_state=random_state, strict=strict,
+        init_func=init_func)
+    calc_corr = factorial(proj_dim ** 2 // 2 - 1)
+    corr = projection_layer(
+        list_of_inputs=list_of_inputs, graph=graph,
+        name=name + "_corr", proj_dim=n_components * calc_corr,
+        batch_normalize=batch_normalize,
+        mode_switch=mode_switch,
+        random_state=random_state, strict=strict,
+        init_func=init_func, func=tensor.tanh)
+    binary = projection_layer(
+        list_of_inputs=list_of_inputs, graph=graph,
+        name=name + "_binary", proj_dim=1,
+        batch_normalize=batch_normalize,
+        mode_switch=mode_switch,
+        random_state=random_state, strict=strict,
+        init_func=init_func, func=tensor.nnet.sigmoid)
+    mus = _reshape(mus)
+    sigmas = _reshape(sigmas)
+    corr = _reshape(corr, calc_corr)
+    return binary, coeffs, mus, sigmas, corr
 
 
 def conv2d_layer(list_of_inputs, graph, name, num_feature_maps=None,

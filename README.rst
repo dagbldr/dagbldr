@@ -3,7 +3,7 @@ dagbldr
 A small helper library for building directed acyclic graphs in Theano
 
 
-Why?
+Why
 ---
 I got tired of writing shape tuples all over the place in my experiment code.
 Realizing (partly from dask - a wonderful library)
@@ -16,7 +16,7 @@ and wrapped this library around it.
 
 How
 ----
-Easy prototyping of out-of-core recurrent models with conditional structures
+Easy prototyping of out-of-core recurrent models with conditional structures,
 simple monitoring via html plots, many wrapped examples and tests,
 and a focus on node/function based code instead
 of an object-oriented approach. 

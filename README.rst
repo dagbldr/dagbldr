@@ -46,8 +46,8 @@ the latest version of Theano.
 
 Once this is done, clone this repo and run
 
-``
-python setup.py develop
-``
+
+``python setup.py develop``
+
 
 Try running tests and examples to be sure install worked correctly.

@@ -37,6 +37,11 @@ I (likely) won't be taking pull requests beyond bug fixes, though this may chang
 Feel free to fork and hack, and if something cool emerges we can bring it
 upstream.
 
+WARNING
+-------
+If you use this library, I will likely break your code. Someday I hope to have enough examples, tests,
+and experiments to have the API solid, but for now consider this "bleeding edge" type development.
+
 
 Install
 -------

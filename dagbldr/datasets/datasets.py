@@ -1127,27 +1127,28 @@ def fetch_iamondb():
             for n, (strokes_files, ascii_file) in enumerate(se):
                 if n % 100 == 0:
                     print("Processing file %i of %i" % (n, len(se)))
-                with af.extractfile(ascii_file) as fp:
-                    cleaned = [t.strip().decode("utf-8") for t in fp.readlines()
-                               if t != '\r\n'
-                               and t != ' \n'
-                               and t != '\n'
-                               and t != ' \r\n']
+                fp = af.extractfile(ascii_file)
+                cleaned = [t.strip().decode("utf-8") for t in fp.readlines()
+                           if t != '\r\n'
+                           and t != ' \n'
+                           and t != '\n'
+                           and t != ' \r\n']
 
-                    # Try using CSR
-                    idx = [w for w, li in enumerate(cleaned) if li == "CSR:"][0]
-                    cleaned_sub = cleaned[idx + 1:]
-                    corrected_sub = []
+                # Try using CSR
+                idx = [w for w, li in enumerate(cleaned) if li == "CSR:"][0]
+                cleaned_sub = cleaned[idx + 1:]
+                corrected_sub = []
 
-                    for li in cleaned_sub:
-                        # Handle edge case with %%%%% meaning new line?
-                        if "%" in li:
-                            li2 = re.sub('\%\%+', '%', li).split("%")
-                            li2 = ''.join([l.strip() for l in li2])
-                            corrected_sub.append(li2)
-                        else:
-                            corrected_sub.append(li)
-                    corrected_sub = [c for c in corrected_sub if c != '']
+                for li in cleaned_sub:
+                    # Handle edge case with %%%%% meaning new line?
+                    if "%" in li:
+                        li2 = re.sub('\%\%+', '%', li).split("%")
+                        li2 = ''.join([l.strip() for l in li2])
+                        corrected_sub.append(li2)
+                    else:
+                        corrected_sub.append(li)
+                corrected_sub = [c for c in corrected_sub if c != '']
+                fp.close()
 
                 n_one_hot = 57
                 y = [np.zeros((len(li), n_one_hot), dtype='int16')
@@ -1171,37 +1172,34 @@ def fetch_iamondb():
 
                 x = []
                 for stroke_file in strokes_files:
-                    with lsf.extractfile(stroke_file) as fp:
-                        tree = etree.parse(fp)
-                        root = tree.getroot()
-                        # Get all the values from the XML
-                        # 0th index is stroke ID, will become up/down
-                        s = np.array([[i, int(Point.attrib['x']),
-                                      int(Point.attrib['y'])]
-                                      for StrokeSet in root
-                                      for i, Stroke in enumerate(StrokeSet)
-                                      for Point in Stroke])
+                    fp = lsf.extractfile(stroke_file)
+                    tree = etree.parse(fp)
+                    root = tree.getroot()
+                    # Get all the values from the XML
+                    # 0th index is stroke ID, will become up/down
+                    s = np.array([[i, int(Point.attrib['x']),
+                                   int(Point.attrib['y'])]
+                                  for StrokeSet in root
+                                  for i, Stroke in enumerate(StrokeSet)
+                                  for Point in Stroke])
 
-                        # flip y axis
-                        s[:, 2] = -s[:, 2]
+                    # flip y axis
+                    s[:, 2] = -s[:, 2]
 
-                        # Get end of stroke points
-                        c = s[1:, 0] != s[:-1, 0]
-                        nci = np.copy(np.where(c == False)[0]) - 1
-                        nci = nci[nci >= 0]
-                        ci = np.copy(np.where(c == True)[0]) - 1
-                        ci = ci[ci >= 0]
-                        s = s[:-1]
+                    # Get end of stroke points
+                    c = s[1:, 0] != s[:-1, 0]
+                    ci = np.where(c == True)[0]
+                    nci = np.where(c == False)[0]
 
-                        # set pen down
-                        s[0, 0] = 0
-                        s[nci, 0] = 0
+                    # set pen down
+                    s[0, 0] = 0
+                    s[nci, 0] = 0
 
-                        # set pen up
-                        s[ci, 0] = 1
-                        s[-1, 0] = 1
-
-                        x.append(s)
+                    # set pen up
+                    s[ci, 0] = 1
+                    s[-1, 0] = 1
+                    x.append(s)
+                    fp.close()
 
                 if len(x) != len(y):
                     x_t = np.vstack((x[-2], x[-1]))

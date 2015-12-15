@@ -15,13 +15,10 @@ import inspect
 import zipfile
 import time
 import pprint
-try:
-    import cPickle as pickle
-except ImportError:
-    import pickle
 from collections import defaultdict
 from functools import reduce
 from .plot_utils import _filled_js_template_from_results_dict
+from ..externals import dill
 
 # TODO: Fetch from env
 NUM_SAVED_TO_KEEP = 2
@@ -223,12 +220,12 @@ def convert_to_one_hot(itr, n_classes, dtype="int32"):
     return one_hot
 
 
-def _pickle(save_path, items_dict):
+def _pickle(save_path, pickle_item):
     """ Simple wrapper for checkpoint dictionaries """
     old_recursion_limit = sys.getrecursionlimit()
     sys.setrecursionlimit(40000)
     with open(save_path, mode="wb") as f:
-        pickle.dump(items_dict, f, protocol=-1)
+        dill.dump(pickle_item, f, protocol=-1)
     sys.setrecursionlimit(old_recursion_limit)
 
 
@@ -237,9 +234,9 @@ def _unpickle(save_path):
     old_recursion_limit = sys.getrecursionlimit()
     sys.setrecursionlimit(40000)
     with open(save_path, mode="rb") as f:
-        items_dict = pickle.load(f)
+        pickle_item = dill.load(f)
     sys.setrecursionlimit(old_recursion_limit)
-    return items_dict
+    return pickle_item
 
 
 def _get_shared_variables_from_function(func):
@@ -321,12 +318,12 @@ def save_results(save_path, results):
     save_checkpoint(save_path, results)
 
 
-def save_checkpoint(save_path, items_dict):
+def save_checkpoint(save_path, pickle_item):
     """ Simple wrapper for checkpoint dictionaries """
     old_recursion_limit = sys.getrecursionlimit()
     sys.setrecursionlimit(40000)
     with open(save_path, mode="wb") as f:
-        pickle.dump(items_dict, f, protocol=-1)
+        dill.dump(pickle_item, f, protocol=-1)
     sys.setrecursionlimit(old_recursion_limit)
 
 
@@ -335,20 +332,22 @@ def load_checkpoint(saved_checkpoint_path):
     old_recursion_limit = sys.getrecursionlimit()
     sys.setrecursionlimit(40000)
     with open(saved_checkpoint_path, mode="rb") as f:
-        items_dict = pickle.load(f)
+        pickle_item = dill.load(f)
     sys.setrecursionlimit(old_recursion_limit)
-    return items_dict
+    return pickle_item
 
 
 def load_last_checkpoint(append_name=None):
     """ Simple pickle wrapper for checkpoint dictionaries """
     save_paths = glob.glob(os.path.join(get_checkpoint_dir(), "*.pkl"))
-    if len(save_paths) == 0:
-        raise ValueError("No checkpoint found in %s" % get_checkpoint_dir())
+    save_paths = [s for s in save_paths if "results" not in s]
     if append_name is not None:
         save_paths = [s.split(append_name)[:-1] + s.split(append_name)[-1:]
                       for s in save_paths]
     sorted_paths = _get_file_matches("*.pkl", "best")
+    sorted_paths = [s for s in sorted_paths if "results" not in s]
+    if len(sorted_paths) == 0:
+        raise ValueError("No checkpoint found in %s" % get_checkpoint_dir())
     last_checkpoint_path = sorted_paths[-1]
     print("Loading checkpoint from %s" % last_checkpoint_path)
     return load_checkpoint(last_checkpoint_path)
@@ -506,9 +505,10 @@ def monitor_status_func(results_dict, append_name=None,
             _cleanup_monitors("checkpoint", append_name)
 
 
-def checkpoint_status_func(checkpoint_dict, results,
-                           append_name=None, nan_check=True):
+def _old_checkpoint_status_func(checkpoint_dict, results,
+                                append_name=None, nan_check=True):
     """ Saves a checkpoint dict """
+    checkpoint_dict = checkpoint_dict
     checkpoint_dict["previous_results"] = results
     nan_test = [(k, True) for k, e_v in results.items()
                 for v in e_v if np.isnan(v)]
@@ -534,6 +534,41 @@ def checkpoint_status_func(checkpoint_dict, results,
     if not _in_nosetest():
         # Don't dump if testing!
         save_checkpoint(checkpoint_save_path, checkpoint_dict)
+        save_weights(weight_save_path, checkpoint_dict)
+        save_results(results_save_path, results)
+        _cleanup_checkpoints(append_name)
+    monitor_status_func(results, append_name=append_name)
+
+
+def checkpoint_status_func(training_loop, results,
+                           append_name=None, nan_check=True):
+    """ Saves a checkpoint dict """
+    checkpoint_dict = training_loop.checkpoint_dict
+    checkpoint_dict["previous_results"] = results
+    nan_test = [(k, True) for k, e_v in results.items()
+                for v in e_v if np.isnan(v)]
+    if nan_check and len(nan_test) > 0:
+        nan_keys = set([tup[0] for tup in nan_test])
+        raise ValueError("Found NaN values in the following keys ",
+                         "%s, exiting training without saving" % nan_keys)
+
+    n_seen = max([len(l) for l in results.values()])
+    checkpoint_save_path = os.path.join(
+        get_checkpoint_dir(), "model_checkpoint_%i.pkl" % n_seen)
+    weight_save_path = os.path.join(
+        get_checkpoint_dir(), "model_weights_%i.npz" % n_seen)
+    results_save_path = os.path.join(
+        get_checkpoint_dir(), "model_results_%i.pkl" % n_seen)
+    if append_name is not None:
+        def mkpath(name):
+            split = name.split("_")
+            return "_".join(split[:-1] + [append_name] + split[-1:])
+        checkpoint_save_path = mkpath(checkpoint_save_path)
+        weight_save_path = mkpath(weight_save_path)
+        results_save_path = mkpath(results_save_path)
+    if not _in_nosetest():
+        # Don't dump if testing!
+        save_checkpoint(checkpoint_save_path, training_loop)
         save_weights(weight_save_path, checkpoint_dict)
         save_results(results_save_path, results)
         _cleanup_checkpoints(append_name)
@@ -954,9 +989,9 @@ def _iterate_function(train_function, valid_function,
                     new = min(previous_results[valid_output_name])
                     if new < old:
                         print("Saving checkpoint based on validation score")
-                        checkpoint_status_func(checkpoint_dict,
-                                               previous_results,
-                                               append_name="best")
+                        _old_checkpoint_status_func(checkpoint_dict,
+                                                    previous_results,
+                                                    append_name="best")
                         _save_best_functions(train_function, valid_function,
                                              optimizer_object)
                         _save_best_results(previous_results)
@@ -964,8 +999,8 @@ def _iterate_function(train_function, valid_function,
                             patience = max(patience,
                                            new_sample_count * patience_increase)
                     else:
-                        checkpoint_status_func(checkpoint_dict,
-                                               previous_results)
+                        _old_checkpoint_status_func(checkpoint_dict,
+                                                    previous_results)
                 results = _init_results_dict()
             last_update_count = new_update_count
             last_sample_count = new_sample_count
@@ -1077,3 +1112,271 @@ def early_stopping_trainer(train_function, valid_function,
             # final checkpoint
             checkpoint_status_func(checkpoint_dict, previous_results)
     return previous_results
+
+
+class TrainingLoop(object):
+    def __init__(self, train_function, valid_function,
+                 train_indices, valid_indices,
+                 minibatch_size,
+                 monitor_function=None,
+                 monitor_indices="valid",
+                 checkpoint_dict=None,
+                 list_of_minibatch_functions=[make_minibatch],
+                 list_of_train_output_names=None,
+                 valid_output_name=None,
+                 valid_frequency="valid_length",
+                 n_epochs=100,
+                 optimizer_object=None,
+                 patience_based_stopping=False,
+                 patience_minimum="valid_length",
+                 patience_increase=2,
+                 patience_improvement=0.995,
+                 previous_results=None,
+                 shuffle=False, random_state=None,
+                 verbose=False):
+        """
+        Minibatch arguments should come first.
+
+        Constant arguments which should not be iterated can be passed as
+        list_of_non_minibatch_args.
+
+        If list_of_minibatch_functions is length 1, will be replicated
+        to length of
+        list_of_args - applying the same function to all minibatch arguments in
+        list_of_args. Otherwise, this should be the same length as list_of_args
+
+        list_of_output_names simply names the output of the passed in function.
+        Should be the same length as the number of outputs from the function.
+
+        status_func is a function run periodically (based on n_status_points),
+        which allows for validation, early stopping, checkpointing, etc.
+
+        previous_epoch_results allows for continuing from saved checkpoints
+
+        n_minibatch_status
+
+        shuffle and random_state are used to determine if minibatches are run
+        in sequence or selected randomly each epoch.
+        """
+        self.train_function = train_function
+        self.valid_function = valid_function
+        self.train_indices = train_indices
+        self.valid_indices = valid_indices
+        self.minibatch_size = minibatch_size
+        self.monitor_function = monitor_function
+        self.monitor_indices = monitor_indices
+        self.checkpoint_dict = checkpoint_dict
+        self.list_of_minibatch_functions = list_of_minibatch_functions
+        self.list_of_train_output_names = list_of_train_output_names
+        self.valid_output_name = valid_output_name
+        self.valid_frequency = valid_frequency
+        self.n_epochs = n_epochs
+        self.optimizer_object = optimizer_object
+        self.patience_based_stopping = patience_based_stopping
+        self.patience_minimum = patience_minimum
+        self.patience_increase = patience_increase
+        self.patience_improvement = patience_improvement
+        self.previous_results = previous_results
+        self.shuffle = shuffle
+        self.random_state = random_state
+        self.verbose = verbose
+
+    def run(self, list_of_minibatch_args):
+        return self._run(list_of_minibatch_args)
+
+    def _run(self, list_of_minibatch_args):
+        train_function = self.train_function
+        valid_function = self.valid_function
+        train_indices = self.train_indices
+        valid_indices = self.valid_indices
+        minibatch_size = self.minibatch_size
+        monitor_function = self.monitor_function
+        monitor_indices = self.monitor_indices
+        checkpoint_dict = self.checkpoint_dict
+        list_of_minibatch_functions = self.list_of_minibatch_functions
+        list_of_train_output_names = self.list_of_train_output_names
+        valid_output_name = self.valid_output_name
+        valid_frequency = self.valid_frequency
+        n_epochs = self.n_epochs
+        optimizer_object = self.optimizer_object
+        patience_based_stopping = self.patience_based_stopping
+        patience_minimum = self.patience_minimum
+        patience_increase = self.patience_increase
+        patience_improvement = self.patience_improvement
+        previous_results = self.previous_results
+        shuffle = self.shuffle
+        random_state = self.random_state
+        verbose = self.verbose
+        if previous_results is not None:
+            raise ValueError("previous_results argument no longer supported! "
+                             "checkpoint_dict should contain this information.")
+
+        if "previous_results" in checkpoint_dict.keys():
+            previous_results = checkpoint_dict["previous_results"]
+        else:
+            print("previous_results not found in checkpoint_dict.keys() "
+                  "creating new storage for previous_results")
+            previous_results = defaultdict(list)
+
+        #  Input checking and setup
+        if shuffle:
+            assert random_state is not None
+
+        for arg in list_of_minibatch_args:
+            assert len(arg) == len(list_of_minibatch_args[0])
+
+        # Bad things happen if this is out of bounds
+        final_index = max(max(train_indices), max(valid_indices))
+        assert final_index < len(list_of_minibatch_args[0])
+
+        train_minibatch_indices = _make_minibatch_from_indices(train_indices,
+                                                               minibatch_size)
+        valid_minibatch_indices = _make_minibatch_from_indices(valid_indices,
+                                                               minibatch_size)
+
+        if valid_frequency == "valid_length":
+            valid_frequency = len(valid_minibatch_indices)
+        elif valid_frequency == "train_length":
+            valid_frequency = len(train_minibatch_indices)
+        else:
+            assert valid_frequency >= 1
+
+        if patience_minimum == "valid_length":
+            patience_minimum = len(valid_indices)
+        else:
+            assert patience_minimum > 1
+
+        if len(list_of_minibatch_functions) == 1:
+            list_of_minibatch_functions = list_of_minibatch_functions * len(
+                list_of_minibatch_args)
+        else:
+            assert len(list_of_minibatch_functions) == len(
+                list_of_minibatch_args)
+
+        # Function loop
+        global_start = time.time()
+        if not _in_nosetest():
+            _archive_dagbldr()
+            # add calling commandline arguments here...
+
+        if len(previous_results.keys()) != 0:
+            last_sample_count = previous_results[
+                "total_number_of_samples_auto"][-1]
+            last_update_count = previous_results[
+                "total_number_of_updates_auto"][-1]
+            last_epoch_count = previous_results[
+                "total_number_of_epochs_auto"][-1]
+        else:
+            last_sample_count = 0
+            last_update_count = 0
+            last_epoch_count = 0
+
+        last_valid_count = 0
+        if len(previous_results.keys()) != 0:
+            old_patience = previous_results["current_patience_auto"][-1]
+            patience = patience_increase * old_patience
+        else:
+            patience = patience_minimum
+        done_looping = False
+        results = _init_results_dict()
+        for e in range(n_epochs):
+            new_epoch_count = last_epoch_count + 1
+            if patience_based_stopping and done_looping:
+                break
+            epoch_start = time.time()
+            if shuffle:
+                random_state.shuffle(train_minibatch_indices)
+
+            for minibatch_count, mi in enumerate(train_minibatch_indices):
+                train_minibatch_results = _apply_function_over_minibatch(
+                    train_function, list_of_minibatch_args,
+                    list_of_minibatch_functions, mi)
+                for n, k in enumerate(train_minibatch_results):
+                    if list_of_train_output_names is not None:
+                        assert len(list_of_train_output_names) == len(
+                            train_minibatch_results)
+                        results[list_of_train_output_names[n]].append(
+                            train_minibatch_results[n])
+                    else:
+                        results[n].append(train_minibatch_results[n])
+                # assumes this is a slice object which is *almost* always true
+                new_sample_count = last_sample_count + (mi.stop - mi.start)
+                new_update_count = last_update_count + 1
+                if new_update_count >= (last_valid_count + valid_frequency):
+                    last_valid_count = new_update_count
+                    # Validation and monitoring here...
+                    if monitor_function is not None:
+                        print(
+                            "Running monitor at update %i" % last_update_count)
+                        if monitor_indices == "valid":
+                            monitor_minibatch_indices = valid_minibatch_indices
+                        elif monitor_indices == "train":
+                            monitor_minibatch_indices = train_minibatch_indices
+                        elif monitor_indices == "full":
+                            monitor_minibatch_indices = train_minibatch_indices
+                            monitor_minibatch_indices += valid_minibatch_indices
+                        else:
+                            raise ValueError(
+                                "monitor_indices %s not supported" %
+                                monitor_indices)
+                        for mi in monitor_minibatch_indices:
+                            monitor_results = _apply_function_over_minibatch(
+                                monitor_function, list_of_minibatch_args,
+                                list_of_minibatch_functions, mi)
+                    print(
+                        "Computing validation at update %i" % last_update_count)
+                    valid_results = defaultdict(list)
+                    for minibatch_count, mi in enumerate(
+                        valid_minibatch_indices):
+                        valid_minibatch_results = _apply_function_over_minibatch(
+                            valid_function, list_of_minibatch_args,
+                            list_of_minibatch_functions, mi)
+                        valid_results[
+                            valid_output_name] += valid_minibatch_results
+
+                    # Monitoring output
+                    output = {r: np.mean(results[r]) for r in results.keys()}
+                    output["total_number_of_samples_auto"] = new_sample_count
+                    output["total_number_of_updates_auto"] = new_update_count
+                    output["current_patience_auto"] = patience
+                    valid_cost = np.mean(valid_results[valid_output_name])
+                    epoch_stop = time.time()
+                    output["minibatch_size_auto"] = minibatch_size
+                    output["train_minibatch_count_auto"] = len(
+                        train_minibatch_indices)
+                    output["valid_minibatch_count_auto"] = len(
+                        valid_minibatch_indices)
+                    output["train_sample_count_auto"] = len(train_indices)
+                    output["valid_sample_count_auto"] = len(valid_indices)
+                    output["start_time_s_auto"] = global_start
+                    output["this_epoch_time_s_auto"] = epoch_stop - epoch_start
+                    output["total_number_of_epochs_auto"] = new_epoch_count
+                    for k in output.keys():
+                        previous_results[k].append(output[k])
+
+                    if checkpoint_dict is not None:
+                        # Quick trick to avoid 0 length list
+                        old = min(
+                            previous_results[valid_output_name] + [np.inf])
+                        previous_results[valid_output_name].append(valid_cost)
+                        new = min(previous_results[valid_output_name])
+                        if new < old:
+                            print("Saving checkpoint based on validation score")
+                            checkpoint_status_func(self, previous_results,
+                                                   append_name="best")
+                            _save_best_functions(train_function, valid_function,
+                                                 optimizer_object)
+                            _save_best_results(previous_results)
+                            if new < old * patience_improvement:
+                                patience = max(
+                                    patience,
+                                    new_sample_count * patience_increase)
+                        else:
+                            checkpoint_status_func(self, previous_results)
+                    results = _init_results_dict()
+                last_update_count = new_update_count
+                last_sample_count = new_sample_count
+                if last_sample_count > patience:
+                    done_looping = True
+            last_epoch_count = new_epoch_count
+        return previous_results

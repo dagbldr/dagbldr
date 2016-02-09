@@ -2,7 +2,7 @@ from dagbldr.datasets import make_ocr
 from dagbldr.nodes import log_ctc_cost
 from dagbldr.nodes import gru_recurrent_layer, softmax_layer
 from dagbldr.optimizers import adadelta
-from dagbldr.utils import fixed_n_epochs_trainer
+from dagbldr.utils import TrainingLoop
 from dagbldr.utils import add_datasets_to_graph, make_masked_minibatch
 from dagbldr.utils import get_params_and_grads
 
@@ -74,14 +74,14 @@ def print_ctc_prediction(X_sym, X_mask_sym, y_sym, y_mask_sym):
         print(ctc_string)
         print(non_ctc_string)
 
-fixed_n_epochs_trainer(fit_function, cost_function,
-                       train_indices, valid_indices,
-                       checkpoint_dict, [X, y], len(y),
-                       monitor_function=print_ctc_prediction,
-                       list_of_minibatch_functions=[
-                           make_masked_minibatch,
-                           make_masked_minibatch],
-                       list_of_train_output_names=["cost"],
-                       valid_output_name="valid_cost",
-                       valid_frequency=100,
-                       n_epochs=1000)
+TL = TrainingLoop(fit_function, cost_function, train_indices, valid_indices,
+                  checkpoint_dict=checkpoint_dict, minibatch_size=len(y),
+                  monitor_function=print_ctc_prediction,
+                  list_of_minibatch_functions=[
+                      make_masked_minibatch,
+                      make_masked_minibatch],
+                  list_of_train_output_names=["cost"],
+                  valid_output_name="valid_cost",
+                  valid_frequency=100,
+                  n_epochs=1000)
+TL.run([X, y])

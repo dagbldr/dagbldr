@@ -8,7 +8,7 @@ from dagbldr.utils import add_datasets_to_graph, get_params_and_grads
 from dagbldr.utils import get_weights_from_graph
 from dagbldr.utils import convert_to_one_hot
 from dagbldr.utils import create_checkpoint_dict
-from dagbldr.utils import early_stopping_trainer
+from dagbldr.utils import TrainingLoop
 from dagbldr.nodes import tanh_layer, softmax_zeros_layer
 from dagbldr.nodes import categorical_crossentropy
 
@@ -61,11 +61,11 @@ def error(*args):
         y_pred, axis=1).ravel()) == (np.argmax(y, axis=1).ravel()))
 
 
-epoch_results = early_stopping_trainer(
-    fit_function, error, train_indices, valid_indices,
-    checkpoint_dict, [X, y],
-    minibatch_size,
-    list_of_train_output_names=["train_cost"],
-    valid_output_name="valid_error",
-    n_epochs=1000,
-    optimizer_object=opt)
+TL = TrainingLoop(fit_function, error, train_indices, valid_indices,
+                  checkpoint_dict=checkpoint_dict,
+                  minibatch_size=minibatch_size,
+                  list_of_train_output_names=["train_cost"],
+                  valid_output_name="valid_error",
+                  n_epochs=1000,
+                  optimizer_object=opt)
+epoch_results = TL.run([X, y])

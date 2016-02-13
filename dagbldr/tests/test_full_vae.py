@@ -2,10 +2,10 @@ from collections import OrderedDict
 import numpy as np
 import theano
 
-from dagbldr.datasets import load_digits
+from dagbldr.datasets import load_digits, minibatch_iterator
 from dagbldr.utils import add_datasets_to_graph, convert_to_one_hot
 from dagbldr.utils import get_params_and_grads
-from dagbldr.utils import early_stopping_trainer
+from dagbldr.utils import TrainingLoop
 from dagbldr.nodes import softplus_layer, linear_layer
 from dagbldr.nodes import gaussian_log_sample_layer
 from dagbldr.nodes import sigmoid_layer
@@ -59,12 +59,12 @@ def test_vae():
                                     mode="FAST_COMPILE")
 
     checkpoint_dict = {}
-    train_indices = np.arange(len(X))
-    valid_indices = np.arange(len(X))
-    early_stopping_trainer(fit_function, cost_function,
-                           train_indices, valid_indices,
-                           checkpoint_dict, [X],
-                           minibatch_size,
-                           list_of_train_output_names=["cost"],
-                           valid_output_name="valid_cost",
-                           n_epochs=1)
+    train_itr = minibatch_iterator([X], minibatch_size, axis=0)
+    valid_itr = minibatch_iterator([X], minibatch_size, axis=0)
+    TL = TrainingLoop(fit_function, cost_function,
+                      train_itr, valid_itr,
+                      checkpoint_dict=checkpoint_dict,
+                      list_of_train_output_names=["cost"],
+                      valid_output_name="valid_cost",
+                      n_epochs=1)
+    TL.run()

@@ -3,9 +3,10 @@ import numpy as np
 import theano
 
 from dagbldr.optimizers import sgd
+from dagbldr.datasets import minibatch_iterator
+from dagbldr.utils import TrainingLoop
 from dagbldr.utils import add_datasets_to_graph, get_params_and_grads
 from dagbldr.utils import create_checkpoint_dict
-from dagbldr.utils import fixed_n_epochs_trainer, make_masked_minibatch
 from dagbldr.nodes import tanh_layer, gru_recurrent_layer, masked_cost
 from dagbldr.nodes import bernoulli_and_correlated_log_gaussian_mixture_layer
 from dagbldr.nodes import bernoulli_and_correlated_log_gaussian_mixture_cost
@@ -76,14 +77,15 @@ def test_mixture_density():
                                     mode="FAST_COMPILE")
 
     checkpoint_dict = create_checkpoint_dict(locals())
-
-    epoch_results = fixed_n_epochs_trainer(
-        fit_function, cost_function, train_indices, valid_indices,
-        checkpoint_dict, [X, y],
-        minibatch_size,
-        list_of_train_output_names=["train_cost"],
-        valid_output_name="valid_cost",
-        n_epochs=1)
+    train_itr = minibatch_iterator([X, y], minibatch_size, axis=0)
+    valid_itr = minibatch_iterator([X, y], minibatch_size, axis=0)
+    TL = TrainingLoop(fit_function, cost_function,
+                      train_itr, valid_itr,
+                      checkpoint_dict=checkpoint_dict,
+                      list_of_train_output_names=["train_cost"],
+                      valid_output_name="valid_cost",
+                      n_epochs=1)
+    TL.run()
 
 
 def test_correlated_mixture_density():
@@ -94,8 +96,6 @@ def test_correlated_mixture_density():
                                          graph)
     n_hid = 20
     minibatch_size = len(bernoulli_X)
-    train_indices = np.arange(len(bernoulli_X))
-    valid_indices = np.arange(len(bernoulli_X))
 
     l1 = tanh_layer([X_sym], graph, 'l1', proj_dim=n_hid,
                     random_state=random_state)
@@ -117,14 +117,17 @@ def test_correlated_mixture_density():
                                     mode="FAST_COMPILE")
 
     checkpoint_dict = create_checkpoint_dict(locals())
-
-    epoch_results = fixed_n_epochs_trainer(
-        fit_function, cost_function, train_indices, valid_indices,
-        checkpoint_dict, [bernoulli_X, bernoulli_y],
-        minibatch_size,
-        list_of_train_output_names=["train_cost"],
-        valid_output_name="valid_cost",
-        n_epochs=1)
+    train_itr = minibatch_iterator([bernoulli_X, bernoulli_y],
+                                   minibatch_size, axis=0)
+    valid_itr = minibatch_iterator([bernoulli_X, bernoulli_y],
+                                   minibatch_size, axis=0)
+    TL = TrainingLoop(fit_function, cost_function,
+                      train_itr, valid_itr,
+                      checkpoint_dict=checkpoint_dict,
+                      list_of_train_output_names=["train_cost"],
+                      valid_output_name="valid_cost",
+                      n_epochs=1)
+    TL.run()
 
 
 def test_rnn_correlated_mixture_density():
@@ -134,15 +137,15 @@ def test_rnn_correlated_mixture_density():
     minibatch_size = 5
     X_seq = np.array([bernoulli_X for i in range(minibatch_size)])
     y_seq = np.array([bernoulli_y for i in range(minibatch_size)])
-    X_mb, X_mb_mask = make_masked_minibatch(X_seq, slice(0, minibatch_size))
-    y_mb, y_mb_mask = make_masked_minibatch(y_seq, slice(0, minibatch_size))
+    train_itr = minibatch_iterator([X_seq, y_seq], minibatch_size,
+                                   make_mask=True, axis=1)
+    X_mb, X_mb_mask, y_mb, y_mb_mask = next(train_itr)
+    train_itr.reset()
     datasets_list = [X_mb, X_mb_mask, y_mb, y_mb_mask]
     names_list = ["X", "X_mask", "y", "y_mask"]
     X_sym, X_mask_sym, y_sym, y_mask_sym = add_datasets_to_graph(
         datasets_list, names_list, graph)
     n_hid = 5
-    train_indices = np.arange(len(X_seq))
-    valid_indices = np.arange(len(X_seq))
 
     l1 = tanh_layer([X_sym], graph, 'l1', proj_dim=n_hid,
                     random_state=random_state)
@@ -160,13 +163,13 @@ def test_rnn_correlated_mixture_density():
                                     mode="FAST_COMPILE")
 
     checkpoint_dict = create_checkpoint_dict(locals())
-
-    epoch_results = fixed_n_epochs_trainer(
-        cost_function, cost_function, train_indices, valid_indices,
-        checkpoint_dict, [X_seq, y_seq],
-        minibatch_size,
-        list_of_minibatch_functions=[make_masked_minibatch,
-                                     make_masked_minibatch],
-        list_of_train_output_names=["train_cost"],
-        valid_output_name="valid_cost",
-        n_epochs=1)
+    valid_itr = minibatch_iterator([X_seq, y_seq], minibatch_size,
+                                   make_mask=True, axis=1)
+    # no fit
+    TL = TrainingLoop(cost_function, cost_function,
+                      train_itr, valid_itr,
+                      checkpoint_dict=checkpoint_dict,
+                      list_of_train_output_names=["train_cost"],
+                      valid_output_name="valid_cost",
+                      n_epochs=1)
+    TL.run()

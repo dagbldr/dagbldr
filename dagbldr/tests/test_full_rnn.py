@@ -2,10 +2,10 @@ import numpy as np
 import theano
 
 from theano.compat.python2x import OrderedDict
-from dagbldr.datasets import make_sincos
+from dagbldr.datasets import make_sincos, minibatch_iterator
 from dagbldr.optimizers import sgd
 from dagbldr.utils import add_datasets_to_graph, get_params_and_grads
-from dagbldr.utils import early_stopping_trainer
+from dagbldr.utils import TrainingLoop
 from dagbldr.nodes import linear_layer, squared_error, masked_cost
 from dagbldr.nodes import tanh_recurrent_layer, gru_recurrent_layer
 from dagbldr.nodes import lstm_recurrent_layer
@@ -69,15 +69,17 @@ def test_tanh_rnn():
     cost_function = theano.function([X_sym, X_mask_sym, y_sym, y_mask_sym],
                                     [cost], mode="FAST_COMPILE")
     checkpoint_dict = {}
-    train_indices = np.arange(X.shape[1])
-    valid_indices = np.arange(X.shape[1])
-    early_stopping_trainer(fit_function, cost_function,
-                           train_indices, valid_indices,
-                           checkpoint_dict,
-                           [X, y], minibatch_size,
-                           list_of_train_output_names=["cost"],
-                           valid_output_name="valid_cost",
-                           n_epochs=1)
+    train_itr = minibatch_iterator([X, y], minibatch_size, make_mask=True,
+                                   axis=1)
+    valid_itr = minibatch_iterator([X, y], minibatch_size, make_mask=True,
+                                   axis=1)
+    TL = TrainingLoop(fit_function, cost_function,
+                      train_itr, valid_itr,
+                      checkpoint_dict=checkpoint_dict,
+                      list_of_train_output_names=["cost"],
+                      valid_output_name="valid_cost",
+                      n_epochs=1)
+    TL.run()
 
 
 def test_gru_rnn():
@@ -125,15 +127,17 @@ def test_gru_rnn():
     cost_function = theano.function([X_sym, X_mask_sym, y_sym, y_mask_sym],
                                     [cost], mode="FAST_COMPILE")
     checkpoint_dict = {}
-    train_indices = np.arange(X.shape[1])
-    valid_indices = np.arange(X.shape[1])
-    early_stopping_trainer(fit_function, cost_function,
-                           train_indices, valid_indices,
-                           checkpoint_dict,
-                           [X, y], minibatch_size,
-                           list_of_train_output_names=["cost"],
-                           valid_output_name="valid_cost",
-                           n_epochs=1)
+    train_itr = minibatch_iterator([X, y], minibatch_size, make_mask=True,
+                                   axis=1)
+    valid_itr = minibatch_iterator([X, y], minibatch_size, make_mask=True,
+                                   axis=1)
+    TL = TrainingLoop(fit_function, cost_function,
+                      train_itr, valid_itr,
+                      checkpoint_dict=checkpoint_dict,
+                      list_of_train_output_names=["cost"],
+                      valid_output_name="valid_cost",
+                      n_epochs=1)
+    TL.run()
 
 
 def test_lstm_rnn():
@@ -182,12 +186,14 @@ def test_lstm_rnn():
     cost_function = theano.function([X_sym, X_mask_sym, y_sym, y_mask_sym],
                                     [cost], mode="FAST_COMPILE")
     checkpoint_dict = {}
-    train_indices = np.arange(X.shape[1])
-    valid_indices = np.arange(X.shape[1])
-    early_stopping_trainer(fit_function, cost_function,
-                           train_indices, valid_indices,
-                           checkpoint_dict,
-                           [X, y], minibatch_size,
-                           list_of_train_output_names=["cost"],
-                           valid_output_name="valid_cost",
-                           n_epochs=1)
+    train_itr = minibatch_iterator([X, y], minibatch_size, make_mask=True,
+                                   axis=1)
+    valid_itr = minibatch_iterator([X, y], minibatch_size, make_mask=True,
+                                   axis=1)
+    TL = TrainingLoop(fit_function, cost_function,
+                      train_itr, valid_itr,
+                      checkpoint_dict=checkpoint_dict,
+                      list_of_train_output_names=["cost"],
+                      valid_output_name="valid_cost",
+                      n_epochs=1)
+    TL.run()

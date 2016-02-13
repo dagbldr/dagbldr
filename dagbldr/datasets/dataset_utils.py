@@ -3,6 +3,73 @@ import numbers
 import numpy as np
 
 
+class minibatch_iterator(object):
+    def __init__(self, list_of_containers, minibatch_size,
+                 axis,
+                 start_index=0,
+                 make_mask=False,
+                 random_access=False,
+                 list_of_formatters=None,
+                 random_state=None):
+        self.list_of_containers = list_of_containers
+        self.minibatch_size = minibatch_size
+        self.make_mask = make_mask
+        self.start_index = start_index
+        self.slice_start_ = start_index
+        if list_of_formatters is None:
+            self.list_of_formatters = [lambda x: x for x in list_of_containers]
+        else:
+            self.list_of_formatters = list_of_formatters
+        self.axis = axis
+        if axis not in [0, 1]:
+            raise ValueError("Unknown sample_axis setting %i" % sample_axis)
+        self.random_access = random_access
+        if self.random_access and random_state is None:
+            self.random_state = random_state
+            raise ValueError("Must provide random seed for random_access!")
+
+    def reset(self):
+        self.slice_start_ = self.start_index
+
+    def __iter__(self):
+        return self
+
+    def next(self):
+        return self.__next__()
+
+    def __next__(self):
+        self.slice_end_ = self.slice_start_ + self.minibatch_size
+        ind = np.arange(self.slice_start_, self.slice_end_)
+        self.slice_start_ = self.slice_end_
+        if self.make_mask is False:
+            return self._slice_without_masks(ind)
+        else:
+            return self._slice_with_masks(ind)
+
+    def _slice_without_masks(self, ind):
+        try:
+            if self.axis == 0:
+                return [c[ind] for c in self.list_of_containers]
+            elif self.axis == 1:
+                return [c[:, ind] for c in self.list_of_containers]
+        except IndexError:
+            self.reset()
+            raise StopIteration("End of iteration")
+
+    def _slice_with_masks(self, ind):
+        try:
+            cs = self._slice_without_masks(ind)
+            if self.axis == 0:
+                ms = [np.ones_like(c[:, 0]) for c in cs]
+            elif self.axis == 1:
+                ms = [np.ones_like(c[:, :, 0]) for c in cs]
+            assert len(cs) == len(ms)
+            return [i for sublist in list(zip(cs, ms)) for i in sublist]
+        except IndexError:
+            self.reset()
+            raise StopIteration("End of iteration")
+
+
 def add_memory_swapper(earray, mem_size):
     class _cEArray(tables.EArray):
         pass

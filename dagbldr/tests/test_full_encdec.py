@@ -2,16 +2,17 @@ import numpy as np
 import theano
 
 from theano.compat.python2x import OrderedDict
-from dagbldr.datasets import load_mountains
+from dagbldr.datasets import load_mountains, minibatch_iterator
 from dagbldr.optimizers import sgd
+from dagbldr.utils import TrainingLoop
 from dagbldr.utils import add_datasets_to_graph, get_params_and_grads
-from dagbldr.utils import early_stopping_trainer, make_character_level_from_text
+from dagbldr.utils import make_character_level_from_text
 from dagbldr.utils import gen_make_list_one_hot_minibatch
 from dagbldr.nodes import masked_cost, categorical_crossentropy
 from dagbldr.nodes import softmax_layer, shift_layer
 from dagbldr.nodes import gru_recurrent_layer, conditional_gru_recurrent_layer
 from dagbldr.nodes import bidirectional_gru_recurrent_layer
-from dagbldr.nodes import conditional_attention_gru_recurrent_layer
+from dagbldr.nodes import content_attention_gru_recurrent_layer
 
 
 # minibatch size
@@ -29,8 +30,8 @@ n_chars = len(mapper.keys())
 text_minibatch_func = gen_make_list_one_hot_minibatch(n_chars)
 X = [l[:3] for l in cleaned]
 y = [l[3:5] for l in cleaned]
-X_mb, X_mask = text_minibatch_func(X, slice(0, minibatch_size))
-y_mb, y_mask = text_minibatch_func(y, slice(0, minibatch_size))
+X_mb, X_mb_mask = text_minibatch_func(X, slice(0, minibatch_size))
+y_mb, y_mb_mask = text_minibatch_func(y, slice(0, minibatch_size))
 
 
 def test_conditional_gru_recurrent():
@@ -40,7 +41,7 @@ def test_conditional_gru_recurrent():
     n_out = n_chars
 
     # input (where first dimension is time)
-    datasets_list = [X_mb, X_mask, y_mb, y_mask]
+    datasets_list = [X_mb, X_mb_mask, y_mb, y_mb_mask]
     names_list = ["X", "X_mask", "y", "y_mask"]
     X_sym, X_mask_sym, y_sym, y_mask_sym = add_datasets_to_graph(
         datasets_list, names_list, graph)
@@ -80,17 +81,17 @@ def test_conditional_gru_recurrent():
                                     [cost], mode="FAST_COMPILE")
 
     checkpoint_dict = {}
-    train_indices = np.arange(len(X))
-    valid_indices = np.arange(len(X))
-    early_stopping_trainer(cost_function, cost_function,
-                           train_indices, valid_indices,
-                           checkpoint_dict,
-                           [X, y],
-                           minibatch_size,
-                           list_of_minibatch_functions=[text_minibatch_func],
-                           list_of_train_output_names=["cost"],
-                           valid_output_name="valid_cost",
-                           n_epochs=1)
+    train_itr = minibatch_iterator([X_mb, X_mb_mask, y_mb, y_mb_mask],
+                                   minibatch_size, axis=1)
+    valid_itr = minibatch_iterator([X_mb, X_mb_mask, y_mb, y_mb_mask],
+                                   minibatch_size, axis=1)
+    TL = TrainingLoop(cost_function, cost_function,
+                      train_itr, valid_itr,
+                      checkpoint_dict=checkpoint_dict,
+                      list_of_train_output_names=["cost"],
+                      valid_output_name="valid_cost",
+                      n_epochs=1)
+    TL.run()
 
 
 def test_conditional_attention_gru_recurrent():
@@ -100,7 +101,7 @@ def test_conditional_attention_gru_recurrent():
     n_out = n_chars
 
     # input (where first dimension is time)
-    datasets_list = [X_mb, X_mask, y_mb, y_mask]
+    datasets_list = [X_mb, X_mb_mask, y_mb, y_mb_mask]
     names_list = ["X", "X_mask", "y", "y_mask"]
     X_sym, X_mask_sym, y_sym, y_mask_sym = add_datasets_to_graph(
         datasets_list, names_list, graph)
@@ -110,7 +111,7 @@ def test_conditional_attention_gru_recurrent():
 
     shifted_y_sym = shift_layer([y_sym], graph, 'shift')
 
-    h_dec, context, attention = conditional_attention_gru_recurrent_layer(
+    h_dec, context, attention = content_attention_gru_recurrent_layer(
         [y_sym], [h], y_mask_sym, X_mask_sym, n_hid, graph, 'l2_dec',
         random_state)
 
@@ -139,14 +140,14 @@ def test_conditional_attention_gru_recurrent():
                                     [cost], mode="FAST_COMPILE")
 
     checkpoint_dict = {}
-    train_indices = np.arange(len(X))
-    valid_indices = np.arange(len(X))
-    early_stopping_trainer(cost_function, cost_function,
-                           train_indices, valid_indices,
-                           checkpoint_dict,
-                           [X, y],
-                           minibatch_size,
-                           list_of_minibatch_functions=[text_minibatch_func],
-                           list_of_train_output_names=["cost"],
-                           valid_output_name="valid_cost",
-                           n_epochs=1)
+    train_itr = minibatch_iterator([X_mb, X_mb_mask, y_mb, y_mb_mask],
+                                   minibatch_size, axis=1)
+    valid_itr = minibatch_iterator([X_mb, X_mb_mask, y_mb, y_mb_mask],
+                                   minibatch_size, axis=1)
+    TL = TrainingLoop(cost_function, cost_function,
+                      train_itr, valid_itr,
+                      checkpoint_dict=checkpoint_dict,
+                      list_of_train_output_names=["cost"],
+                      valid_output_name="valid_cost",
+                      n_epochs=1)
+    TL.run()

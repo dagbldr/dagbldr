@@ -2,7 +2,7 @@ from collections import OrderedDict
 import numpy as np
 import theano
 
-from dagbldr.datasets import load_digits
+from dagbldr.datasets import load_digits, minibatch_iterator
 from dagbldr.optimizers import sgd
 from dagbldr.utils import add_datasets_to_graph, get_params_and_grads
 from dagbldr.utils import get_weights_from_graph
@@ -38,7 +38,7 @@ def test_loop():
 
     params, grads = get_params_and_grads(graph, cost)
 
-    learning_rate = .13
+    learning_rate = .01
     opt = sgd(params, learning_rate)
     updates = opt.updates(params, grads)
 
@@ -59,29 +59,13 @@ def test_loop():
         return 1 - np.mean((np.argmax(
             y_pred, axis=1).ravel()) == (np.argmax(y, axis=1).ravel()))
 
-    TL1 = TrainingLoop(fit_function, error,
-                       train_indices[:10],
-                       valid_indices[:10],
-                       minibatch_size,
+    train_itr = minibatch_iterator([X, y], 10, axis=0)
+    valid_itr = minibatch_iterator([X, y], 10, axis=0)
+    TL1 = TrainingLoop(fit_function, cost_function,
+                       train_itr,
+                       valid_itr,
                        checkpoint_dict=checkpoint_dict,
                        list_of_train_output_names=["train_cost"],
                        valid_output_name="valid_error", n_epochs=1,
                        optimizer_object=opt)
-    epoch_results1 = TL1.run([X, y])
-    TL1.train_indices = train_indices[10:20]
-    TL1.valid_indices = valid_indices[10:20]
-    epoch_results1 = TL1.run([X, y])
-
-    TL2 = TrainingLoop(fit_function, error,
-                       train_indices[:20],
-                       valid_indices[:20],
-                       minibatch_size,
-                       checkpoint_dict=checkpoint_dict,
-                       list_of_train_output_names=["train_cost"],
-                       valid_output_name="valid_error", n_epochs=1,
-                       optimizer_object=opt)
-    epoch_results2 = TL2.run([X, y])
-
-    r1 = TL1.__dict__["checkpoint_dict"]["previous_results"]["train_cost"][-1]
-    r2 = TL2.__dict__["checkpoint_dict"]["previous_results"]["train_cost"][-1]
-    assert r1 == r2
+    epoch_results1 = TL1.run()

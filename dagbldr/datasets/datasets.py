@@ -1023,7 +1023,7 @@ def make_ocr(list_of_strings):
         y_n = string_to_character_index(s)
         data.append(X_n)
         target.append(y_n)
-    data = np.asarray(data)
+    data = np.asarray(data).transpose(1, 0, 2)
     target = np.asarray(target)
     return {"data": data, "target": target,
             "train_indices": np.arange(len(list_of_strings)),

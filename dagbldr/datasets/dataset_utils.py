@@ -7,6 +7,7 @@ class minibatch_iterator(object):
     def __init__(self, list_of_containers, minibatch_size,
                  axis,
                  start_index=0,
+                 stop_index=np.inf,
                  make_mask=False,
                  random_access=False,
                  list_of_formatters=None,
@@ -15,6 +16,7 @@ class minibatch_iterator(object):
         self.minibatch_size = minibatch_size
         self.make_mask = make_mask
         self.start_index = start_index
+        self.stop_index = stop_index
         self.slice_start_ = start_index
         if list_of_formatters is None:
             self.list_of_formatters = [lambda x: x for x in list_of_containers]
@@ -22,7 +24,7 @@ class minibatch_iterator(object):
             self.list_of_formatters = list_of_formatters
         self.axis = axis
         if axis not in [0, 1]:
-            raise ValueError("Unknown sample_axis setting %i" % sample_axis)
+            raise ValueError("Unknown sample_axis setting %i" % axis)
         self.random_access = random_access
         if self.random_access and random_state is None:
             self.random_state = random_state
@@ -39,6 +41,10 @@ class minibatch_iterator(object):
 
     def __next__(self):
         self.slice_end_ = self.slice_start_ + self.minibatch_size
+        if self.slice_end_ > self.stop_index:
+            # TODO: Think about boundary issues with weird shaped last mb
+            self.reset()
+            raise StopIteration("Stop index reached")
         ind = np.arange(self.slice_start_, self.slice_end_)
         self.slice_start_ = self.slice_end_
         if self.make_mask is False:

@@ -3,7 +3,7 @@ import numpy as np
 import theano
 from theano import tensor
 
-from dagbldr.datasets import fetch_mnist
+from dagbldr.datasets import fetch_mnist, minibatch_iterator
 from dagbldr.optimizers import sgd_nesterov
 from dagbldr.utils import add_datasets_to_graph, get_params_and_grads
 from dagbldr.utils import get_weights_from_graph
@@ -59,22 +59,32 @@ checkpoint_dict = create_checkpoint_dict(locals())
 
 def error(*args):
     xargs = args[:-1]
-    y = args[-1]
+    y_val = args[-1]
     final_args = xargs + (1,)
     y_pred = predict_function(*final_args)[0]
-    return 1 - np.mean((np.argmax(
-        y_pred, axis=1).ravel()) == (np.argmax(y, axis=1).ravel()))
+    yp = np.argmax(y_pred, axis=1).ravel()
+    yv = np.argmax(y_val, axis=1).ravel()
+    match = (yp == yv)
+    return 1. - np.mean(match)
 
 
 def bn_fit_function(X, y):
     return fit_function(X, y, 0)
 
 
-TL = TrainingLoop(bn_fit_function, error, train_indices, valid_indices,
+def bn_cost_function(X, y):
+    return cost_function(X, y, 0)
+
+
+train_itr = minibatch_iterator([X, y], minibatch_size, axis=0, stop_index=60000)
+valid_itr = minibatch_iterator([X, y], minibatch_size, axis=0,
+                               start_index=60000)
+
+TL = TrainingLoop(bn_fit_function, bn_cost_function,
+                  train_itr, valid_itr,
                   checkpoint_dict=checkpoint_dict,
-                  minibatch_size=minibatch_size,
                   list_of_train_output_names=["train_cost"],
-                  valid_output_name="valid_error",
+                  valid_output_name="valid_cost",
                   n_epochs=1000,
                   optimizer_object=opt)
-epoch_results = TL.run([X, y])
+epoch_results = TL.run()

@@ -49,7 +49,7 @@ X_std = np.sqrt(X_sqr - X_mean ** 2)
 def normalize(x):
     return np.hstack((x[:, 0][:, None], (x[:, 1:] - X_mean) / (X_std)))
 
-X = np.array([normalize(x) for x in X])
+X = np.array([normalize(x).astype(theano.config.floatX) for x in X])
 y = np.array([x[1:] for x in X])
 X = np.array([x[:-1] for x in X])
 

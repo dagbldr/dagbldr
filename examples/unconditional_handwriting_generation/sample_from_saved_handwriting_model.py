@@ -1,5 +1,5 @@
 from dagbldr.utils import load_checkpoint, make_masked_minibatch
-from dagbldr.datasets import fetch_iamondb
+from dagbldr.datasets import fetch_iamondb, list_iterator
 import numpy as np
 import theano
 import sys
@@ -76,8 +76,8 @@ def undelta(x):
 
 model_path = sys.argv[1]
 checkpoint = load_checkpoint(model_path)
-predict_function = checkpoint["predict_function"]
-cost_function = checkpoint["cost_function"]
+predict_function = checkpoint.checkpoint_dict["predict_function"]
+cost_function = checkpoint.checkpoint_dict["cost_function"]
 
 iamondb = fetch_iamondb()
 X = iamondb["data"]
@@ -97,13 +97,15 @@ def normalize(x):
 def unnormalize(x):
     return np.hstack((x[:, 0][:, None], (x[:, 1:] * X_std) + X_mean))
 
-X = np.array([normalize(x) for x in X])
+X = np.array([normalize(x).astype(theano.config.floatX) for x in X])
 y = np.array([x[1:] for x in X])
 X = np.array([x[:-1] for x in X])
 
 minibatch_size = 20  # Size must match size in training, same for above preproc
-X_mb, X_mb_mask = make_masked_minibatch(X, slice(0, minibatch_size))
-y_mb, y_mb_mask = make_masked_minibatch(y, slice(0, minibatch_size))
+train_itr = list_iterator([X, y], minibatch_size, axis=1, make_mask=True,
+                          stop_index=1000)
+X_mb, X_mb_mask, y_mb, y_mb_mask = next(train_itr)
+
 running_mb = X_mb[:1] * 0
 running_mask = X_mb_mask[:1] * 0
 

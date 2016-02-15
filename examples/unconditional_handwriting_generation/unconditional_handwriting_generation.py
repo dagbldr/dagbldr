@@ -2,11 +2,11 @@ from collections import OrderedDict
 import numpy as np
 import theano
 
-from dagbldr.datasets import fetch_iamondb
+from dagbldr.datasets import fetch_iamondb, list_iterator
 from dagbldr.optimizers import adam, gradient_clipping
 from dagbldr.utils import add_datasets_to_graph, get_params_and_grads
-from dagbldr.utils import create_checkpoint_dict, make_masked_minibatch
-from dagbldr.utils import fixed_n_epochs_trainer
+from dagbldr.utils import create_checkpoint_dict
+from dagbldr.utils import TrainingLoop
 from dagbldr.nodes import relu_layer, lstm_recurrent_layer, masked_cost
 from dagbldr.nodes import bernoulli_and_correlated_log_gaussian_mixture_layer
 from dagbldr.nodes import bernoulli_and_correlated_log_gaussian_mixture_cost
@@ -54,18 +54,17 @@ y = np.array([x[1:] for x in X])
 X = np.array([x[:-1] for x in X])
 
 train_end = int(.8 * len(X))
-valid_end = len(X)
-train_indices = np.arange(train_end)
-valid_indices = np.arange(train_end, valid_end)
 
 random_state = np.random.RandomState(1999)
 minibatch_size = 20
 n_hid = 300
 rnn_dim = 1200
 
-X_mb, X_mb_mask = make_masked_minibatch(X, slice(0, minibatch_size))
-y_mb, y_mb_mask = make_masked_minibatch(y, slice(0, minibatch_size))
 
+train_itr = list_iterator([X, y], minibatch_size, axis=1, make_mask=True,
+                          stop_index=train_end)
+X_mb, X_mb_mask, y_mb, y_mb_mask = next(train_itr)
+train_itr.reset()
 
 datasets_list = [X_mb, X_mb_mask, y_mb, y_mb_mask]
 names_list = ["X", "X_mask", "y", "y_mask"]
@@ -98,14 +97,15 @@ cost_function = theano.function([X_sym, X_mask_sym, y_sym, y_mask_sym], [cost])
 predict_function = theano.function([X_sym, X_mask_sym],
                                    [binary, coeffs, mus, sigmas, corr])
 
+valid_itr = list_iterator([X, y], minibatch_size, axis=1, make_mask=True,
+                          start_index=train_end)
+
 checkpoint_dict = create_checkpoint_dict(locals())
 
-epoch_results = fixed_n_epochs_trainer(
-    fit_function, cost_function, train_indices, valid_indices,
-    checkpoint_dict, [X, y],
-    minibatch_size,
-    list_of_minibatch_functions=[make_masked_minibatch, make_masked_minibatch],
-    list_of_train_output_names=["train_cost"],
-    valid_output_name="valid_cost",
-    valid_frequency="train_length",
-    n_epochs=20)
+TL = TrainingLoop(fit_function, cost_function,
+                  train_itr, valid_itr,
+                  checkpoint_dict=checkpoint_dict,
+                  list_of_train_output_names=["train_cost"],
+                  valid_output_name="valid_cost",
+                  n_epochs=20)
+epoch_results = TL.run()

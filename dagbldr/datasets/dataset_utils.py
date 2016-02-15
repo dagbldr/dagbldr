@@ -3,32 +3,22 @@ import numbers
 import numpy as np
 
 
-class minibatch_iterator(object):
+class base_iterator(object):
     def __init__(self, list_of_containers, minibatch_size,
                  axis,
                  start_index=0,
                  stop_index=np.inf,
                  make_mask=False,
-                 random_access=False,
-                 list_of_formatters=None,
-                 random_state=None):
+                 one_hot_class_size=None):
         self.list_of_containers = list_of_containers
         self.minibatch_size = minibatch_size
         self.make_mask = make_mask
         self.start_index = start_index
         self.stop_index = stop_index
         self.slice_start_ = start_index
-        if list_of_formatters is None:
-            self.list_of_formatters = [lambda x: x for x in list_of_containers]
-        else:
-            self.list_of_formatters = list_of_formatters
         self.axis = axis
         if axis not in [0, 1]:
             raise ValueError("Unknown sample_axis setting %i" % axis)
-        self.random_access = random_access
-        if self.random_access and random_state is None:
-            self.random_state = random_state
-            raise ValueError("Must provide random seed for random_access!")
 
     def reset(self):
         self.slice_start_ = self.start_index
@@ -58,6 +48,77 @@ class minibatch_iterator(object):
                 return [c[ind] for c in self.list_of_containers]
             elif self.axis == 1:
                 return [c[:, ind] for c in self.list_of_containers]
+        except IndexError:
+            self.reset()
+            raise StopIteration("End of iteration")
+
+    def _slice_with_masks(self, ind):
+        try:
+            cs = self._slice_without_masks(ind)
+            if self.axis == 0:
+                ms = [np.ones_like(c[:, 0]) for c in cs]
+            elif self.axis == 1:
+                ms = [np.ones_like(c[:, :, 0]) for c in cs]
+            assert len(cs) == len(ms)
+            return [i for sublist in list(zip(cs, ms)) for i in sublist]
+        except IndexError:
+            self.reset()
+            raise StopIteration("End of iteration")
+
+
+class minibatch_iterator(base_iterator):
+    def _slice_without_masks(self, ind):
+        try:
+            if self.axis == 0:
+                return [c[ind] for c in self.list_of_containers]
+            elif self.axis == 1:
+                return [c[:, ind] for c in self.list_of_containers]
+        except IndexError:
+            self.reset()
+            raise StopIteration("End of iteration")
+
+    def _slice_with_masks(self, ind):
+        try:
+            cs = self._slice_without_masks(ind)
+            if self.axis == 0:
+                ms = [np.ones_like(c[:, 0]) for c in cs]
+            elif self.axis == 1:
+                ms = [np.ones_like(c[:, :, 0]) for c in cs]
+            assert len(cs) == len(ms)
+            return [i for sublist in list(zip(cs, ms)) for i in sublist]
+        except IndexError:
+            self.reset()
+            raise StopIteration("End of iteration")
+
+
+class list_iterator(base_iterator):
+    def _slice_without_masks(self, ind):
+        try:
+            sliced_c = [np.asarray(c[ind]) for c in self.list_of_containers]
+            for n in range(len(sliced_c)):
+                sc = sliced_c[n]
+                if not isinstance(sc, np.ndarray) or sc.dtype == np.object:
+                    maxlen = max([len(i) for i in sc])
+                    # Assume they at least have the same internal dtype
+                    if len(sc[0].shape) > 1:
+                        total_shape = (maxlen, sc[0].shape[1])
+                    elif len(sc[0].shape) == 1:
+                        total_shape = (maxlen, 1)
+                    else:
+                        raise ValueError("Unhandled array size in list")
+                    if self.axis == 0:
+                        raise ValueError("Unsupported axis of iteration")
+                        new_sc = np.zeros((len(sc), total_shape[0],
+                                           total_shape[1]))
+                        new_sc = new_sc.squeeze().astype(sc[0].dtype)
+                    else:
+                        new_sc = np.zeros((total_shape[0], len(sc),
+                                           total_shape[1]))
+                        new_sc = new_sc.astype(sc[0].dtype)
+                        for m, sc_i in enumerate(sc):
+                            new_sc[:len(sc_i), m, :] = sc_i
+                    sliced_c[n] = new_sc
+            return sliced_c
         except IndexError:
             self.reset()
             raise StopIteration("End of iteration")

@@ -5,7 +5,8 @@ import theano
 from dagbldr.optimizers import adadelta
 from dagbldr.utils import add_datasets_to_graph, get_params_and_grads
 from dagbldr.utils import create_checkpoint_dict
-from dagbldr.utils import fixed_n_epochs_trainer
+from dagbldr.utils import TrainingLoop
+from dagbldr.datasets import minibatch_iterator
 from dagbldr.nodes import tanh_layer
 from dagbldr.nodes import log_gaussian_mixture_layer, log_gaussian_mixture_cost
 
@@ -32,9 +33,6 @@ sine_x, sine_y = sine_y, sine_x
 sine_x = sine_x[:, None]
 sine_y = sine_y[:, None]
 
-# No real validation here
-train_indices = np.arange(len(sine_y))
-valid_indices = np.arange(len(sine_y))
 X = sine_x
 y = sine_y
 
@@ -64,13 +62,18 @@ predict_function = theano.function([X_sym], [coeffs, mus, log_sigmas])
 
 checkpoint_dict = create_checkpoint_dict(locals())
 
-epoch_results = fixed_n_epochs_trainer(
-    fit_function, cost_function, train_indices, valid_indices,
-    checkpoint_dict, [X, y],
-    minibatch_size,
-    list_of_train_output_names=["train_cost"],
-    valid_output_name="valid_cost",
-    n_epochs=1000)
+train_itr = minibatch_iterator([X, y], minibatch_size, axis=0)
+valid_itr = minibatch_iterator([X, y], minibatch_size, axis=0)
+
+next(train_itr)
+
+TL = TrainingLoop(fit_function, cost_function,
+                  train_itr, valid_itr,
+                  checkpoint_dict=checkpoint_dict,
+                  list_of_train_output_names=["train_cost"],
+                  valid_output_name="valid_cost",
+                  n_epochs=1000)
+epoch_results = TL.run()
 
 
 def plot_log_gaussian_mixture_heatmap(xlim=(-10, 10), ylim=(-10, 10)):

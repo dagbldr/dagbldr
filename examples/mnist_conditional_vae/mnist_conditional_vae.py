@@ -2,11 +2,11 @@ from collections import OrderedDict
 import numpy as np
 import theano
 
-from dagbldr.datasets import fetch_binarized_mnist
+from dagbldr.datasets import fetch_binarized_mnist, minibatch_iterator
 from dagbldr.optimizers import adam
 from dagbldr.utils import add_datasets_to_graph, get_params_and_grads
-from dagbldr.utils import convert_to_one_hot
-from dagbldr.utils import fixed_n_epochs_trainer
+from dagbldr.utils import convert_to_one_hot, create_or_continue_from_checkpoint_dict
+from dagbldr.utils import TrainingLoop
 from dagbldr.nodes import softplus_layer, linear_layer, sigmoid_layer
 from dagbldr.nodes import gaussian_log_sample_layer, gaussian_log_kl
 from dagbldr.nodes import binary_crossentropy, softmax_layer
@@ -15,6 +15,7 @@ from dagbldr.nodes import categorical_crossentropy
 
 mnist = fetch_binarized_mnist()
 train_indices = mnist["train_indices"]
+train_end = len(train_indices)
 valid_indices = mnist["valid_indices"]
 X = mnist["data"]
 y = mnist["target"]
@@ -96,20 +97,17 @@ cost_function = theano.function([X_sym, y_sym], [nll + kl])
 predict_function = theano.function([X_sym], [y_pred])
 encode_function = theano.function([X_sym], [code_mu, code_log_sigma])
 decode_function = theano.function([samp, y_sym], [out])
-checkpoint_dict = {}
-checkpoint_dict["fit_function"] = fit_function
-checkpoint_dict["cost_function"] = cost_function
-checkpoint_dict["predict_function"] = predict_function
-checkpoint_dict["encode_function"] = encode_function
-checkpoint_dict["decode_function"] = decode_function
-previous_results = None
 
-epoch_results = fixed_n_epochs_trainer(
-    fit_function, cost_function, train_indices, valid_indices,
-    checkpoint_dict, [X, y],
-    minibatch_size,
+checkpoint_dict = create_or_continue_from_checkpoint_dict(locals())
+
+train_itr = minibatch_iterator([X, y], minibatch_size, stop_index=train_end, axis=0)
+valid_itr = minibatch_iterator([X, y], minibatch_size, start_index=train_end, axis=0)
+
+TL = TrainingLoop(
+    fit_function, cost_function,
+    train_itr, valid_itr,
+    checkpoint_dict=checkpoint_dict,
     list_of_train_output_names=["nll", "kl", "lower_bound"],
     valid_output_name="valid_lower_bound",
-    valid_frequency="train_length",
-    n_epochs=2000, previous_results=previous_results,
-    shuffle=True, random_state=random_state)
+    n_epochs=2000)
+epoch_results = TL.run()

@@ -2,10 +2,10 @@ from collections import OrderedDict
 import numpy as np
 import theano
 
-from dagbldr.datasets import fetch_binarized_mnist
+from dagbldr.datasets import fetch_binarized_mnist, minibatch_iterator
 from dagbldr.optimizers import adam
 from dagbldr.utils import add_datasets_to_graph, get_params_and_grads
-from dagbldr.utils import early_stopping_trainer
+from dagbldr.utils import TrainingLoop
 from dagbldr.utils import create_or_continue_from_checkpoint_dict
 from dagbldr.nodes import softplus_layer, linear_layer, sigmoid_layer
 from dagbldr.nodes import gaussian_log_sample_layer, gaussian_log_kl
@@ -14,6 +14,7 @@ from dagbldr.nodes import binary_crossentropy
 
 mnist = fetch_binarized_mnist()
 train_indices = mnist["train_indices"]
+train_end = len(train_indices)
 valid_indices = mnist["valid_indices"]
 X = mnist["data"]
 
@@ -64,9 +65,14 @@ decode_function = theano.function([samp], [out])
 
 checkpoint_dict = create_or_continue_from_checkpoint_dict(locals())
 
-epoch_results = early_stopping_trainer(
-    fit_function, cost_function, train_indices, valid_indices,
-    checkpoint_dict, [X], minibatch_size,
+train_itr = minibatch_iterator([X], minibatch_size, stop_index=train_end, axis=0)
+valid_itr = minibatch_iterator([X], minibatch_size, start_index=train_end, axis=0)
+
+TL = TrainingLoop(
+    fit_function, cost_function,
+    train_itr, valid_itr,
+    checkpoint_dict=checkpoint_dict,
     list_of_train_output_names=["nll", "kl", "lower_bound"],
     valid_output_name="valid_lower_bound",
-    n_epochs=2000, shuffle=True, random_state=random_state)
+    n_epochs=2000)
+epoch_results = TL.run()

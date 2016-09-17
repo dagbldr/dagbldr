@@ -3,18 +3,7 @@ dagbldr
 A small helper library for building directed acyclic graphs in Theano
 
 
-Why
----
-I got tired of writing shape tuples all over the place in my experiment code.
-Realizing (partly from dask - a wonderful library)
-that with the feature dimensionality of my data set and stored,
-all other shapes can be calculated on the fly, I set about trying to do this.
-With the help of the Theano core developers, I managed to cobble together a shape
-inference function
-and wrapped this library around it.
-
-
-How
+What
 ----
 Easy prototyping of out-of-core recurrent models with conditional structures,
 simple monitoring via html plots, many wrapped examples and tests,
@@ -30,12 +19,6 @@ used in an experiment.
 Philosophically, there is similarity to Lasagne (another great neural network library)
 but written with my own research goals in mind.
 
-
-Contributing
-------------
-I (likely) won't be taking pull requests beyond bug fixes, though this may change.
-Feel free to fork and hack, and if something cool emerges we can bring it
-upstream.
 
 WARNING
 -------

@@ -1,3 +1,4 @@
+'''
 import numpy as np
 import theano
 
@@ -151,3 +152,4 @@ def test_conditional_attention_gru_recurrent():
                       valid_output_name="valid_cost",
                       n_epochs=1)
     TL.run()
+'''

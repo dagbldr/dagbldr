@@ -7,7 +7,7 @@ from collections import Counter
 from scipy.io import loadmat, wavfile
 from scipy.linalg import svd
 from functools import reduce
-from ..utils import whitespace_tokenizer, safe_zip
+from ..core import whitespace_tokenizer, safe_zip
 from .preprocessing_utils import stft
 import string
 import tarfile

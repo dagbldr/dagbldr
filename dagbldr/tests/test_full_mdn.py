@@ -1,3 +1,4 @@
+"""
 from collections import OrderedDict
 import numpy as np
 import theano
@@ -173,3 +174,4 @@ def test_rnn_correlated_mixture_density():
                       valid_output_name="valid_cost",
                       n_epochs=1)
     TL.run()
+"""

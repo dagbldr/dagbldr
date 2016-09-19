@@ -1,3 +1,4 @@
+"""
 import numpy as np
 import theano
 
@@ -197,3 +198,4 @@ def test_lstm_rnn():
                       valid_output_name="valid_cost",
                       n_epochs=1)
     TL.run()
+"""

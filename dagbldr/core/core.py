@@ -1,12 +1,27 @@
+# Authors: Kyle Kastner
+from __future__ import print_function
+try:
+    from StringIO import StringIO
+except ImportError:
+    from io import StringIO
+import logging
+import uuid
+from collections import OrderedDict
+
 # Author: Kyle Kastner
 # License: BSD 3-clause
-from __future__ import print_function
-import __main__ as main
+import random
 import os
+import glob
+import subprocess
+import numpy as np
+from itertools import cycle
+
+# Author: Kyle Kastner
+# License: BSD 3-clause
+import __main__ as main
 import re
 import shutil
-import numpy as np
-import glob
 import numbers
 import theano
 import sys
@@ -17,13 +32,82 @@ import time
 import pprint
 from collections import defaultdict
 from functools import reduce
-from .plot_utils import _filled_js_template_from_results_dict
 from ..externals import dill
+
+
+logging.basicConfig(level=logging.INFO,
+                    format='%(message)s')
+logger = logging.getLogger(__name__)
+
+string_f = StringIO()
+ch = logging.StreamHandler(string_f)
+# Automatically put the HTML break characters on there
+formatter = logging.Formatter('%(message)s<br>')
+ch.setFormatter(formatter)
+logger.addHandler(ch)
+
+
+def get_logger():
+    """
+    Fetch the global dagbldr logger.
+    """
+    return logger
+
+
+# Storage of internal shared
+_lib_shared_params = OrderedDict()
+
+
+def get_lib_shared_params():
+    return _lib_shared_params
+
+
+def get_name():
+    base = str(uuid.uuid4())
+    return base
+
+
+def get_shared(name):
+    if name in _lib_shared_params.keys():
+        logger.info("Found name %s in shared parameters" % name)
+        return _lib_shared_params[name]
+    else:
+        raise NameError("Name not found in shared params!")
+
+
+def set_shared(name, variable):
+    if name in _lib_shared_params.keys():
+        raise ValueError("Trying to set key %s which already exists!" % name)
+    _lib_shared_params[name] = variable
+
+
+def del_shared():
+    for key in _lib_shared_params.keys():
+        del _lib_shared_params[key]
+
+
+def get_params():
+    """
+    Returns {name: param}
+    """
+    params = OrderedDict()
+    for name in _lib_shared_params.keys():
+        params[name] = _lib_shared_params[name]
+    return params
+
+
+_type = "float32"
+
+
+def get_type():
+    return _type
+
 
 # TODO: Fetch from env
 NUM_SAVED_TO_KEEP = 2
 
 
+# copied from utils to avoid circular deps
 def safe_zip(*args):
     """Like zip, but ensures arguments are of same length.
 
@@ -35,6 +119,60 @@ def safe_zip(*args):
             raise ValueError("Argument 0 has length %d but argument %d has "
                              "length %d" % (base, i+1, len(arg)))
     return zip(*args)
+
+
+def convert_to_one_hot(itr, n_classes, dtype="int32"):
+    """ Convert 1D or 2D iterators of class to 2D or 3D iterators of one hot
+        class indicators.
+
+        Parameters
+        ----------
+        itr : iterator
+            itr can be list of list, 1D or 2D np.array. In all cases, the
+            fundamental element must have type int32 or int64.
+
+        n_classes : int
+           number of classes to expand itr to - this will become shape[-1] of
+           the returned array.
+
+        dtype : optional, default "int32"
+           dtype for the returned array.
+
+        Returns
+        -------
+        one_hot : array
+           A 2D or 3D numpy array of one_hot values. List of list or 2D
+           np.array will return a 3D numpy array, while 1D itr or list will
+           return a 2D one_hot.
+
+    """
+    is_two_d = False
+    error_msg = """itr not understood. convert_to_one_hot accepts\n
+                   list of list of int, 1D or 2D numpy arrays of\n
+                   dtype int32 or int64"""
+    if type(itr) is np.ndarray and itr.dtype not in [np.object]:
+        if len(itr.shape) == 2:
+            is_two_d = True
+        if itr.dtype not in [np.int32, np.int64]:
+            raise ValueError(error_msg)
+    elif not isinstance(itr[0], numbers.Real):
+        # Assume list of list
+        # iterable of iterable, feature dim must be consistent
+        is_two_d = True
+    elif itr.dtype in [np.object]:
+        is_two_d = True
+    else:
+        raise ValueError(error_msg)
+
+    if is_two_d:
+        lengths = [len(i) for i in itr]
+        one_hot = np.zeros((max(lengths), len(itr), n_classes), dtype=dtype)
+        for n in range(len(itr)):
+            one_hot[np.arange(lengths[n]), n, itr[n]] = 1
+    else:
+        one_hot = np.zeros((len(itr), n_classes), dtype=dtype)
+        one_hot[np.arange(len(itr)), itr] = 1
+    return one_hot
 
 
 def get_checkpoint_dir(checkpoint_dir=None, folder=None, create_dir=True):
@@ -52,7 +190,7 @@ def get_checkpoint_dir(checkpoint_dir=None, folder=None, create_dir=True):
     return checkpoint_dir
 
 
-def _in_nosetest():
+def in_nosetest():
     return sys.argv[0].endswith('nosetests')
 
 
@@ -166,61 +304,7 @@ def make_word_level_from_text(text, tokenizer="default"):
     return cleaned, mapper_func, inverse_mapper_func, mapper
 
 
-def convert_to_one_hot(itr, n_classes, dtype="int32"):
-    """ Convert 1D or 2D iterators of class to 2D or 3D iterators of one hot
-        class indicators.
-
-        Parameters
-        ----------
-        itr : iterator
-            itr can be list of list, 1D or 2D np.array. In all cases, the
-            fundamental element must have type int32 or int64.
-
-        n_classes : int
-           number of classes to expand itr to - this will become shape[-1] of
-           the returned array.
-
-        dtype : optional, default "int32"
-           dtype for the returned array.
-
-        Returns
-        -------
-        one_hot : array
-           A 2D or 3D numpy array of one_hot values. List of list or 2D
-           np.array will return a 3D numpy array, while 1D itr or list will
-           return a 2D one_hot.
-
-    """
-    is_two_d = False
-    error_msg = """itr not understood. convert_to_one_hot accepts\n
-                   list of list of int, 1D or 2D numpy arrays of\n
-                   dtype int32 or int64"""
-    if type(itr) is np.ndarray and itr.dtype not in [np.object]:
-        if len(itr.shape) == 2:
-            is_two_d = True
-        if itr.dtype not in [np.int32, np.int64]:
-            raise ValueError(error_msg)
-    elif not isinstance(itr[0], numbers.Real):
-        # Assume list of list
-        # iterable of iterable, feature dim must be consistent
-        is_two_d = True
-    elif itr.dtype in [np.object]:
-        is_two_d = True
-    else:
-        raise ValueError(error_msg)
-
-    if is_two_d:
-        lengths = [len(i) for i in itr]
-        one_hot = np.zeros((max(lengths), len(itr), n_classes), dtype=dtype)
-        for n in range(len(itr)):
-            one_hot[np.arange(lengths[n]), n, itr[n]] = 1
-    else:
-        one_hot = np.zeros((len(itr), n_classes), dtype=dtype)
-        one_hot[np.arange(len(itr)), itr] = 1
-    return one_hot
-
-
-def _pickle(save_path, pickle_item):
+def pickle(save_path, pickle_item):
     """ Simple wrapper for checkpoint dictionaries """
     old_recursion_limit = sys.getrecursionlimit()
     sys.setrecursionlimit(40000)
@@ -229,7 +313,7 @@ def _pickle(save_path, pickle_item):
     sys.setrecursionlimit(old_recursion_limit)
 
 
-def _unpickle(save_path):
+def unpickle(save_path):
     """ Simple pickle wrapper for checkpoint dictionaries """
     old_recursion_limit = sys.getrecursionlimit()
     sys.setrecursionlimit(40000)
@@ -239,7 +323,7 @@ def _unpickle(save_path):
     return pickle_item
 
 
-def _get_shared_variables_from_function(func):
+def get_shared_variables_from_function(func):
     """
     Get all shared variables out of a compiled Theano function
 
@@ -260,7 +344,7 @@ def _get_shared_variables_from_function(func):
     return shared_variables
 
 
-def _get_values_from_function(func):
+def get_values_from_function(func):
     """
     Get all shared values out of a compiled Theano function
 
@@ -273,10 +357,10 @@ def _get_values_from_function(func):
     list_of_values : list
         A list of numpy arrays
     """
-    return [v.get_value() for v in _get_shared_variables_from_function(func)]
+    return [v.get_value() for v in get_shared_variables_from_function(func)]
 
 
-def _set_shared_variables_in_function(func, list_of_values):
+def set_shared_variables_in_function(func, list_of_values):
     """
     Set all shared variables in a compiled Theano function
 
@@ -304,7 +388,7 @@ def save_weights(save_weights_path, items_dict):
     for k, v in items_dict.items():
         if isinstance(v, theano.compile.function_module.Function):
             # w is all the numpy values from a function
-            w = _get_values_from_function(v)
+            w = get_values_from_function(v)
             for n, w_v in enumerate(w):
                 weights_dict[k + "_%i" % n] = w_v
     if len(weights_dict.keys()) > 0:
@@ -344,7 +428,7 @@ def load_last_checkpoint(append_name=None):
     if append_name is not None:
         save_paths = [s.split(append_name)[:-1] + s.split(append_name)[-1:]
                       for s in save_paths]
-    sorted_paths = _get_file_matches("*.pkl", "best")
+    sorted_paths = get_file_matches("*.pkl", "best")
     sorted_paths = [s for s in sorted_paths if "results" not in s]
     if len(sorted_paths) == 0:
         raise ValueError("No checkpoint found in %s" % get_checkpoint_dir())
@@ -353,14 +437,14 @@ def load_last_checkpoint(append_name=None):
     return load_checkpoint(last_checkpoint_path)
 
 
-def _write_results_as_html(results_dict, save_path, default_show="all"):
-    as_html = _filled_js_template_from_results_dict(
+def write_results_as_html(results_dict, save_path, default_show="all"):
+    as_html = filled_js_template_from_results_dict(
         results_dict, default_show=default_show)
     with open(save_path, "w") as f:
         f.writelines(as_html)
 
 
-def _get_file_matches(glob_ext, append_name):
+def get_file_matches(glob_ext, append_name):
     all_files = glob.glob(
         os.path.join(get_checkpoint_dir(), glob_ext))
     if append_name is None:
@@ -390,7 +474,7 @@ def argsort(seq):
     return sorted(range(len(seq)), key=seq.__getitem__)
 
 
-def _remove_old_files(sorted_files_list):
+def remove_old_files(sorted_files_list):
     n_saved_to_keep = NUM_SAVED_TO_KEEP
     if len(sorted_files_list) > n_saved_to_keep:
         times = [os.path.getctime(f) for f in sorted_files_list]
@@ -400,20 +484,20 @@ def _remove_old_files(sorted_files_list):
                 os.remove(f)
 
 
-def _cleanup_monitors(partial_match, append_name=None):
-    selected_monitors = _get_file_matches(
+def cleanup_monitors(partial_match, append_name=None):
+    selected_monitors = get_file_matches(
         "*" + partial_match + "*.html", append_name)
-    _remove_old_files(selected_monitors)
+    remove_old_files(selected_monitors)
 
 
-def _cleanup_checkpoints(append_name=None):
-    selected_checkpoints = _get_file_matches("*.pkl", append_name)
-    _remove_old_files(selected_checkpoints)
-    selected_checkpoints = _get_file_matches("*.npz", append_name)
-    _remove_old_files(selected_checkpoints)
+def cleanup_checkpoints(append_name=None):
+    selected_checkpoints = get_file_matches("*.pkl", append_name)
+    remove_old_files(selected_checkpoints)
+    selected_checkpoints = get_file_matches("*.npz", append_name)
+    remove_old_files(selected_checkpoints)
 
 
-def _zip_dir(src, dst):
+def zip_dir(src, dst):
     zf = zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED)
     abs_src = os.path.abspath(src)
     exclude_exts = [".js", ".pyc", ".html", ".txt", ".csv", ".gz"]
@@ -426,7 +510,7 @@ def _zip_dir(src, dst):
     zf.close()
 
 
-def _archive_dagbldr():
+def archive_dagbldr():
     checkpoint_dir = get_checkpoint_dir()
     code_snapshot_dir = os.path.join(checkpoint_dir, "code_snapshot")
     if not os.path.exists(code_snapshot_dir):
@@ -452,7 +536,7 @@ def _archive_dagbldr():
         print("Saving code archive %s at %s" % (lib_dir, save_lib_path))
         script_location = os.path.abspath(sys.argv[0])
         shutil.copy2(script_location, save_script_path)
-        _zip_dir(lib_dir, save_lib_path)
+        zip_dir(lib_dir, save_lib_path)
 
 
 def monitor_status_func(results_dict, append_name=None,
@@ -488,7 +572,7 @@ def monitor_status_func(results_dict, append_name=None,
         split = save_path.split("_")
         save_path = "_".join(
             split[:-1] + [append_name] + split[-1:])
-    if not _in_nosetest():
+    if not in_nosetest():
         # Don't dump if testing!
         # Only enable user defined keys
         nan_test = [(k, True) for k, r_v in results_dict.items()
@@ -499,14 +583,14 @@ def monitor_status_func(results_dict, append_name=None,
                              "%s, exiting training" % nan_keys)
         show_keys = [k for k in results_dict.keys()
                      if "_auto" not in k]
-        _write_results_as_html(results_dict, save_path,
-                               default_show=show_keys)
+        write_results_as_html(results_dict, save_path,
+                              default_show=show_keys)
         if status_type == "checkpoint":
-            _cleanup_monitors("checkpoint", append_name)
+            cleanup_monitors("checkpoint", append_name)
 
 
-def _old_checkpoint_status_func(checkpoint_dict, results,
-                                append_name=None, nan_check=True):
+def old_checkpoint_status_func(checkpoint_dict, results,
+                               append_name=None, nan_check=True):
     """ Saves a checkpoint dict """
     checkpoint_dict = checkpoint_dict
     checkpoint_dict["previous_results"] = results
@@ -531,12 +615,12 @@ def _old_checkpoint_status_func(checkpoint_dict, results,
         checkpoint_save_path = mkpath(checkpoint_save_path)
         weight_save_path = mkpath(weight_save_path)
         results_save_path = mkpath(results_save_path)
-    if not _in_nosetest():
+    if not in_nosetest():
         # Don't dump if testing!
         save_checkpoint(checkpoint_save_path, checkpoint_dict)
         save_weights(weight_save_path, checkpoint_dict)
         save_results(results_save_path, results)
-        _cleanup_checkpoints(append_name)
+        cleanup_checkpoints(append_name)
     monitor_status_func(results, append_name=append_name)
 
 
@@ -566,12 +650,12 @@ def checkpoint_status_func(training_loop, results,
         checkpoint_save_path = mkpath(checkpoint_save_path)
         weight_save_path = mkpath(weight_save_path)
         results_save_path = mkpath(results_save_path)
-    if not _in_nosetest():
+    if not in_nosetest():
         # Don't dump if testing!
         save_checkpoint(checkpoint_save_path, training_loop)
         save_weights(weight_save_path, checkpoint_dict)
         save_results(results_save_path, results)
-        _cleanup_checkpoints(append_name)
+        cleanup_checkpoints(append_name)
     monitor_status_func(results, append_name=append_name)
 
 
@@ -731,7 +815,7 @@ def gen_make_list_one_hot_minibatch(n_targets):
     return make_list_one_hot_minibatch
 
 
-def _make_minibatch_from_indices(indices, minibatch_size):
+def make_minibatch_from_indices(indices, minibatch_size):
     if len(indices) % minibatch_size != 0:
         warnings.warn("WARNING:Length of dataset should be evenly divisible"
                       "by minibatch_size - slicing to match.", UserWarning)
@@ -751,8 +835,8 @@ def _make_minibatch_from_indices(indices, minibatch_size):
     return minibatch_indices
 
 
-def _apply_function_over_minibatch(function, list_of_minibatch_args,
-                                   list_of_minibatch_functions, mi):
+def apply_function_over_minibatch(function, list_of_minibatch_args,
+                                  list_of_minibatch_functions, mi):
     minibatch_args = []
     for n, arg in enumerate(list_of_minibatch_args):
         # list of minibatch_functions can't always be the right size
@@ -771,40 +855,40 @@ def _apply_function_over_minibatch(function, list_of_minibatch_args,
     return minibatch_results
 
 
-def _save_best_functions(train_function, valid_function, optimizer_object=None,
+def save_best_functions(train_function, valid_function, optimizer_object=None,
                          fname="__functions.pkl"):
-    if not _in_nosetest():
+    if not in_nosetest():
         checkpoint_dir = get_checkpoint_dir()
         save_path = os.path.join(checkpoint_dir, fname)
-        _pickle(save_path, {"train_function": train_function,
-                            "valid_function": valid_function,
-                            "optimizer_object": optimizer_object})
+        pickle(save_path, {"train_function": train_function,
+                           "valid_function": valid_function,
+                           "optimizer_object": optimizer_object})
 
 
-def _load_best_functions(fname="__functions.pkl"):
-    if not _in_nosetest():
+def load_best_functions(fname="__functions.pkl"):
+    if not in_nosetest():
         checkpoint_dir = get_checkpoint_dir()
         save_path = os.path.join(checkpoint_dir, fname)
-        chk = _unpickle(save_path)
+        chk = unpickle(save_path)
         return (chk["train_function"], chk["valid_function"],
                 chk["optimizer_object"])
 
 
-def _save_best_results(results, fname="__results.pkl"):
-    if not _in_nosetest():
+def save_best_results(results, fname="__results.pkl"):
+    if not in_nosetest():
         checkpoint_dir = get_checkpoint_dir()
         save_path = os.path.join(checkpoint_dir, fname)
-        _pickle(save_path, results)
+        pickle(save_path, results)
 
 
-def _load_best_results(fname="__results.pkl"):
-    if not _in_nosetest():
+def load_best_results(fname="__results.pkl"):
+    if not in_nosetest():
         checkpoint_dir = get_checkpoint_dir()
         save_path = os.path.join(checkpoint_dir, fname)
-        return _unpickle(save_path)
+        return unpickle(save_path)
 
 
-def _init_results_dict():
+def init_results_dict():
     results = defaultdict(list)
     results["total_number_of_epochs_auto"] = [0]
     return results
@@ -875,8 +959,8 @@ class TrainingLoop(object):
         train_minibatch_size = train_iterator.minibatch_size
         valid_minibatch_size = valid_iterator.minibatch_size
 
-        if not _in_nosetest():
-            _archive_dagbldr()
+        if not in_nosetest():
+            archive_dagbldr()
             # add calling commandline arguments here...
 
         if len(previous_results.keys()) != 0:
@@ -885,7 +969,7 @@ class TrainingLoop(object):
         else:
             last_epoch_count = 0
 
-        results = _init_results_dict()
+        results = init_results_dict()
         total_train_minibatch_count = 0
         total_valid_minibatch_count = 0
         global_start = time.time()
@@ -957,12 +1041,12 @@ class TrainingLoop(object):
                                 print("Saving checkpoint based on validation score")
                                 checkpoint_status_func(self, previous_results,
                                                        append_name="best")
-                                _save_best_functions(train_function, valid_function,
+                                save_best_functions(train_function, valid_function,
                                                      optimizer_object)
-                                _save_best_results(previous_results)
+                                save_best_results(previous_results)
                             else:
                                 checkpoint_status_func(self, previous_results)
-                        results = _init_results_dict()
+                        results = init_results_dict()
 
                     if total_train_minibatch_count % monitor_frequency == 0:
                         if monitor_function is not None:
@@ -984,3 +1068,165 @@ class TrainingLoop(object):
             except StopIteration:
                 last_epoch_count = new_epoch_count
         return previous_results
+
+
+def get_js_path():
+    module_path = os.path.dirname(__file__)
+    js_path = os.path.join(module_path, "js_plot_dependencies")
+    return js_path
+
+
+def filled_js_template_from_results_dict(results_dict, default_show="all"):
+    # Uses arbiter strings in the template to split the template and stick
+    # values in
+    js_path = get_js_path()
+    template_path = os.path.join(js_path, "template.html")
+    f = open(template_path, mode='r')
+    all_template_lines = f.readlines()
+    f.close()
+    imports_split_index = [n for n, l in enumerate(all_template_lines)
+                           if "IMPORTS_SPLIT" in l][0]
+    data_split_index = [n for n, l in enumerate(all_template_lines)
+                        if "DATA_SPLIT" in l][0]
+    first_part = all_template_lines[:imports_split_index]
+    imports_part = []
+    js_files_path = os.path.join(js_path, "js")
+    js_file_names = ["jquery-1.9.1.js", "knockout-3.0.0.js",
+                     "highcharts.js", "exporting.js"]
+    js_files = [os.path.join(js_files_path, jsf) for jsf in js_file_names]
+    for js_file in js_files:
+        with open(js_file, "r") as f:
+            imports_part.extend(
+                ["<script>\n"] + f.readlines() + ["</script>\n"])
+    post_imports_part = all_template_lines[
+        imports_split_index + 1:data_split_index]
+    last_part = all_template_lines[data_split_index + 1:]
+
+    def gen_js_field_for_key_value(key, values, show=True):
+        assert type(values) is list
+        if isinstance(values[0], (np.generic, np.ndarray)):
+            values = [float(v.ravel()) for v in values]
+        maxlen = 1500
+        if len(values) > maxlen:
+            values = list(np.interp(np.linspace(0, len(values), maxlen),
+                          np.arange(len(values)), values))
+        show_key = "true" if show else "false"
+        return "{\n    name: '%s',\n    data: %s,\n    visible: %s\n},\n" % (
+            str(key), str(values), show_key)
+    data_part = [gen_js_field_for_key_value(k, results_dict[k], True)
+                 if k in default_show or default_show == "all"
+                 else gen_js_field_for_key_value(k, results_dict[k], False)
+                 for k in sorted(results_dict.keys())]
+    all_filled_lines = first_part + imports_part + post_imports_part
+    all_filled_lines = all_filled_lines + data_part + last_part
+    return all_filled_lines
+
+
+def plot_training_epochs(epochs_dict, plot_name, plot_limit=None,
+                         turn_on_agg=True):
+    # plot_limit can be a positive integer, negative integer, or float in 0 - 1
+    # float between 0 and 1 assumed to be percentage of total to keep
+    if turn_on_agg:
+        import matplotlib
+        matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    # colors from seaborn flatui
+    color_list = ["#9b59b6", "#3498db", "#95a5a6", "#e74c3c", "#34495e",
+                  "#2ecc71"]
+    colors = cycle(color_list)
+    for key in epochs_dict.keys():
+        if plot_limit < 1 and plot_limit > 0:
+            plot_limit = int(plot_limit * len(epochs_dict[key]))
+        plt.plot(epochs_dict[key][:plot_limit], color=colors.next())
+        plt.title(str(key))
+        plt.savefig(plot_name + "_" + str(key) + ".png")
+        plt.close()
+
+
+def plot_images_as_subplots(list_of_plot_args, plot_name, width, height,
+                            invert_y=False, invert_x=False,
+                            figsize=None, turn_on_agg=True):
+    if turn_on_agg:
+        import matplotlib
+        matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    lengths = [len(a) for a in list_of_plot_args]
+    if len(list(filter(lambda x: x != lengths[0], lengths))) > 0:
+        raise ValueError("list_of_plot_args has elements of different lengths!")
+
+    if figsize is None:
+        f, axarr = plt.subplots(lengths[0], len(lengths))
+    else:
+        f, axarr = plt.subplots(lengths[0], len(lengths), figsize=figsize)
+    for n, v in enumerate(list_of_plot_args):
+        for i, X_i in enumerate(v):
+            axarr[i, n].matshow(X_i.reshape(width, height), cmap="gray",
+                                interpolation="none")
+            axarr[i, n].axis('off')
+            if invert_y:
+                axarr[i, n].set_ylim(axarr[i, n].get_ylim()[::-1])
+            if invert_x:
+                axarr[i, n].set_xlim(axarr[i, n].get_xlim()[::-1])
+    plt.tight_layout()
+    plt.savefig(plot_name + ".png")
+
+
+def make_gif(arr, gif_name, plot_width, plot_height, resize_scale_width=5,
+             resize_scale_height=5, list_text_per_frame=None, invert_y=False,
+             invert_x=False, list_text_per_frame_color=None, delay=1,
+             grayscale=False, loop=False, turn_on_agg=True):
+    """ Make a gif from a series of pngs using matplotlib matshow """
+    if turn_on_agg:
+        import matplotlib
+        matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    # Plot temporaries for making gif
+    # use random code to try and avoid deleting surprise files...
+    random_code = random.randrange(2 ** 32)
+    pre = str(random_code)
+    for n, arr_i in enumerate(arr):
+        plt.matshow(arr_i.reshape(plot_width, plot_height), cmap="gray",
+                    interpolation="none")
+        if invert_y:
+            ax = plt.gca()
+            ax.set_ylim(ax.get_ylim()[::-1])
+        if invert_x:
+            ax = plt.gca()
+            ax.set_xlim(ax.get_xlim()[::-1])
+
+        plt.axis('off')
+        if list_text_per_frame is not None:
+            text = list_text_per_frame[n]
+            if list_text_per_frame_color is not None:
+                color = list_text_per_frame_color[n]
+            else:
+                color = "white"
+            plt.text(0, plot_height, text, color=color,
+                     fontsize=2 * plot_height)
+        # This looks rediculous but should count the number of digit places
+        # also protects against multiple runs
+        # plus 1 is to maintain proper ordering
+        plotpath = '__%s_giftmp_%s.png' % (str(n).zfill(len(
+            str(len(arr))) + 1), pre)
+        plt.savefig(plotpath)
+        plt.close()
+
+    # make gif
+    assert delay >= 1
+    gif_delay = int(delay)
+    basestr = "convert __*giftmp_%s.png -delay %s " % (pre, str(gif_delay))
+    if loop:
+        basestr += "-loop 1 "
+    else:
+        basestr += "-loop 0 "
+    if grayscale:
+        basestr += "-depth 8 -type Grayscale -depth 8 "
+    basestr += "-resize %sx%s " % (str(int(resize_scale_width * plot_width)),
+                                   str(int(resize_scale_height * plot_height)))
+    basestr += gif_name
+    print("Attempting gif")
+    print(basestr)
+    subprocess.call(basestr, shell=True)
+    filelist = glob.glob("__*giftmp_%s.png" % pre)
+    for f in filelist:
+        os.remove(f)

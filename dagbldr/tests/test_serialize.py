@@ -1,3 +1,4 @@
+"""
 from collections import OrderedDict
 import numpy as np
 import theano
@@ -69,3 +70,4 @@ def test_loop():
                        valid_output_name="valid_error", n_epochs=1,
                        optimizer_object=opt)
     epoch_results1 = TL1.run()
+"""

@@ -382,7 +382,7 @@ def set_shared_variables_in_function(func, list_of_values):
 
 def save_weights(save_weights_path, items_dict):
     """ Save weights stored in functions contained in items_dict """
-    print("Saving weights to %s" % save_weights_path)
+    logger.info("Saving weights to %s" % save_weights_path)
     weights_dict = {}
     # k is the function name, v is a theano function
     for k, v in items_dict.items():
@@ -394,8 +394,8 @@ def save_weights(save_weights_path, items_dict):
     if len(weights_dict.keys()) > 0:
         np.savez(save_weights_path, **weights_dict)
     else:
-        print("Possible BUG: no theano functions found in items_dict, "
-              "unable to save weights!")
+        logger.info("Possible BUG: no theano functions found in items_dict, "
+                    "unable to save weights!")
 
 
 def save_results(save_path, results):
@@ -433,7 +433,7 @@ def load_last_checkpoint(append_name=None):
     if len(sorted_paths) == 0:
         raise ValueError("No checkpoint found in %s" % get_checkpoint_dir())
     last_checkpoint_path = sorted_paths[-1]
-    print("Loading checkpoint from %s" % last_checkpoint_path)
+    logger.info("Loading checkpoint from %s" % last_checkpoint_path)
     return load_checkpoint(last_checkpoint_path)
 
 
@@ -533,7 +533,7 @@ def archive_dagbldr():
     existing_models = glob.glob(os.path.join(checkpoint_dir, "*.pkl"))
     empty = all([len(l) == 0 for l in (existing_reports, existing_models)])
     if not os.path.exists(save_script_path) or empty:
-        print("Saving code archive %s at %s" % (lib_dir, save_lib_path))
+        logger.info("Saving code archive %s at %s" % (lib_dir, save_lib_path))
         script_location = os.path.abspath(sys.argv[0])
         shutil.copy2(script_location, save_script_path)
         zip_dir(lib_dir, save_lib_path)
@@ -559,11 +559,11 @@ def monitor_status_func(results_dict, append_name=None,
         raise ValueError("Unknown status_type %s" % status_type)
     breakline = "".join(["-"] * (len(statusline) + 1))
     if print_output:
-        print(breakline)
-        print(fileline)
-        print(statusline)
-        print(breakline)
-        pp.pprint(last_results)
+        logger.info(breakline)
+        logger.info(fileline)
+        logger.info(statusline)
+        logger.info(breakline)
+        logger.info(pp.pformat(last_results))
     if status_type == "checkpoint":
         save_path = os.path.join(get_checkpoint_dir(),
                                  "model_checkpoint_%i.html" % n_seen)
@@ -954,8 +954,8 @@ class TrainingLoop(object):
         if "previous_results" in checkpoint_dict.keys():
             previous_results = checkpoint_dict["previous_results"]
         else:
-            print("previous_results not found in checkpoint_dict.keys() "
-                  "creating new storage for previous_results")
+            logger.info("previous_results not found in checkpoint_dict.keys() "
+                        "creating new storage for previous_results")
             previous_results = defaultdict(list)
 
         assert valid_frequency >= 1
@@ -976,6 +976,13 @@ class TrainingLoop(object):
         results = init_results_dict()
         total_train_minibatch_count = 0
         total_valid_minibatch_count = 0
+        # print parameter info
+        logger.info("-------------------")
+        logger.info("Parameter name list")
+        logger.info("-------------------")
+        for key in get_params().keys():
+            logger.info(key)
+        logger.info("-------------------")
         global_start = time.time()
         previous_validation_time = time.time()
         for e in range(n_epochs):
@@ -997,7 +1004,7 @@ class TrainingLoop(object):
                             results[n].append(train_minibatch_results[n])
 
                     if total_train_minibatch_count % valid_frequency == 0:
-                        print("Computing validation at "
+                        logger.info("Computing validation at "
                               "minibatch %i" % total_train_minibatch_count)
                         valid_results = defaultdict(list)
                         try:
@@ -1042,7 +1049,7 @@ class TrainingLoop(object):
                             previous_results[valid_output_name].append(valid_cost)
                             new = min(previous_results[valid_output_name])
                             if new < old:
-                                print("Saving checkpoint based on validation score")
+                                logger.info("Saving checkpoint based on validation score")
                                 checkpoint_status_func(self, previous_results,
                                                        append_name="best")
                                 save_best_functions(train_function, valid_function,
@@ -1054,8 +1061,8 @@ class TrainingLoop(object):
 
                     if total_train_minibatch_count % monitor_frequency == 0:
                         if monitor_function is not None:
-                            print("Running monitor at "
-                                  "update %i" % total_train_minibatch_count)
+                            logger.info("Running monitor at "
+                                        "update %i" % total_train_minibatch_count)
                             if monitor_iterator == "valid":
                                 # Iterate through monitor til StopIteration
                                 try:

@@ -12,12 +12,11 @@ from dagbldr.utils import create_checkpoint_dict
 from dagbldr.nodes import tanh, softmax_zeros
 from dagbldr.nodes import categorical_crossentropy
 
+from dagbldr.datasets import minibatch_iterator
 from dagbldr.training import TrainingLoop
 from dagbldr.optimizers import sgd
 
 mnist = fetch_mnist()
-train_indices = mnist["train_indices"]
-valid_indices = mnist["valid_indices"]
 X = mnist["data"].astype("float32")
 y = mnist["target"]
 n_targets = 10
@@ -30,7 +29,7 @@ y_sym = tensor.fmatrix()
 random_state = np.random.RandomState(1999)
 
 minibatch_size = 20
-n_hid = 1000
+n_hid = 500
 
 l1 = tanh([X_sym], [X.shape[1]], proj_dim=n_hid, name='l1',
           random_state=random_state)
@@ -55,19 +54,23 @@ checkpoint_dict = create_checkpoint_dict(locals())
 
 
 def error(*args):
-    xargs = args[:-1]
+    x = args[0]
     y = args[-1]
-    final_args = xargs
-    y_pred = predict_function(*final_args)[0]
-    return 1 - np.mean((np.argmax(
-        y_pred, axis=1).ravel()) == (np.argmax(y, axis=1).ravel()))
+    y_pred = predict_function(x)[0]
+    y_pred_inds = np.argmax(y_pred, axis=1).ravel()
+    y_inds = np.argmax(y, axis=1).ravel()
+    return [1 - np.mean((y_pred_inds == y_inds).astype("float32"))]
 
 
-TL = TrainingLoop(fit_function, error, train_indices, valid_indices,
+train_itr = minibatch_iterator([X, y], minibatch_size, axis=0,
+                               stop_index=60000)
+valid_itr = minibatch_iterator([X, y], minibatch_size, axis=0,
+                               start_index=60000)
+TL = TrainingLoop(fit_function, error,
+                  train_itr, valid_itr,
                   checkpoint_dict=checkpoint_dict,
-                  minibatch_size=minibatch_size,
                   list_of_train_output_names=["train_cost"],
                   valid_output_name="valid_error",
                   n_epochs=1000,
                   optimizer_object=opt)
-epoch_results = TL.run([X, y])
+epoch_results = TL.run()

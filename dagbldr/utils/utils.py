@@ -3,13 +3,13 @@
 import re
 import numpy as np
 import theano
-import numbers
 from theano import tensor
 from collections import OrderedDict
 
 from ..core import safe_zip
 from ..core import get_type
 from ..core import get_file_matches
+from ..core import get_checkpoint_dir
 from ..core import unpickle
 from ..core import set_shared_variables_in_function
 from ..core import get_lib_shared_params
@@ -23,7 +23,7 @@ def get_weights(accept_regex="_W", skip_regex="_softmax_"):
 
     Returns dictionary of {name: param}
     """
-    d = _get_lib_shared_params()
+    d = get_lib_shared_params()
     if accept_regex is not None:
         ma = re.compile(accept_regex)
     else:
@@ -138,7 +138,7 @@ def create_or_continue_from_checkpoint_dict(lcls, append_name="best"):
         A checkpoint dictionary suitable for passing to a training loop
 
     """
-    sorted_paths = _get_file_matches("*.npz", append_name)
+    sorted_paths = get_file_matches("*.npz", append_name)
     if len(sorted_paths) < 1:
         print("No saved results found in %s, creating!" % get_checkpoint_dir())
         return create_checkpoint_dict(lcls)
@@ -149,11 +149,11 @@ def create_or_continue_from_checkpoint_dict(lcls, append_name="best"):
 
     checkpoint_dict = {}
 
-    sorted_paths = _get_file_matches("*_results_*.pkl", append_name)
+    sorted_paths = get_file_matches("*_results_*.pkl", append_name)
     last_results_path = sorted_paths[-1]
     print("Loading in results from %s" % last_results_path)
 
-    checkpoint_dict["previous_results"] = _unpickle(
+    checkpoint_dict["previous_results"] = unpickle(
         last_results_path)
 
     for k, v in lcls.items():
@@ -162,6 +162,6 @@ def create_or_continue_from_checkpoint_dict(lcls, append_name="best"):
             sorted_matches = sorted(
                 matches, key=lambda x: int(x.split("_")[-1]))
             matching_values = [last_weights[s] for s in sorted_matches]
-            _set_shared_variables_in_function(v, matching_values)
+            set_shared_variables_in_function(v, matching_values)
             checkpoint_dict[k] = v
     return checkpoint_dict

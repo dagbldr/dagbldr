@@ -908,6 +908,10 @@ class TrainingLoop(object):
                  optimizer_object=None,
                  previous_results=None,
                  verbose=False):
+        """
+        Custom functions for train_function or valid_function *must* return
+        a list!
+        """
         self.train_function = train_function
         self.valid_function = valid_function
         self.train_iterator = train_iterator

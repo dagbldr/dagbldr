@@ -39,7 +39,7 @@ weights = get_weights(skip_regex=None).values()
 L2 = sum([(w ** 2).sum() for w in weights])
 cost = nll + .0001 * L2
 
-params = get_params().values()
+params = list(get_params().values())
 grads = theano.grad(cost, params)
 
 learning_rate = 0.01

@@ -980,7 +980,7 @@ class TrainingLoop(object):
         logger.info("-------------------")
         logger.info("Parameter name list")
         logger.info("-------------------")
-        for key in get_params().keys():
+        for key in _lib_shared_params.keys():
             logger.info(key)
         logger.info("-------------------")
         global_start = time.time()

@@ -48,7 +48,7 @@ def get_weights(accept_regex="_W", skip_regex="_softmax_"):
 
 
 def as_shared(arr, **kwargs):
-    return tensor.cast(theano.shared(np.cast[_type](arr)), _type)
+    return theano.shared(np.cast[_type](arr))
 
 
 def concatenate(tensor_list, name, axis=0):

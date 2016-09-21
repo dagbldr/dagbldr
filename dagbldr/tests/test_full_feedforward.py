@@ -5,7 +5,6 @@ from theano import tensor
 from dagbldr.datasets import minibatch_iterator
 from dagbldr.utils import convert_to_one_hot
 from dagbldr import get_params, del_shared
-from dagbldr.training import TrainingLoop
 from dagbldr.nodes import linear, softmax
 
 from dagbldr.nodes import categorical_crossentropy
@@ -44,17 +43,13 @@ def test_feedforward_classifier():
 
     cost_function = theano.function([X_sym, y_sym], [cost],
                                     mode="FAST_COMPILE")
-
-    checkpoint_dict = {}
     train_itr = minibatch_iterator([X, y], minibatch_size, axis=0)
     valid_itr = minibatch_iterator([X, y], minibatch_size, axis=0)
-    TL = TrainingLoop(fit_function, cost_function,
-                      train_itr, valid_itr,
-                      checkpoint_dict=checkpoint_dict,
-                      list_of_train_output_names=["cost"],
-                      valid_output_name="valid_cost",
-                      n_epochs=1)
-    TL.run()
+    X_train, y_train = next(train_itr)
+    X_train, y_train = next(train_itr)
+    X_valid, y_valid = next(valid_itr)
+    fit_function(X_train, y_train)
+    cost_function(X_valid, y_valid)
 
 
 def test_feedforward_theano_mix():
@@ -83,13 +78,9 @@ def test_feedforward_theano_mix():
     cost_function = theano.function([X_sym, y_sym], [cost],
                                     mode="FAST_COMPILE")
 
-    checkpoint_dict = {}
     train_itr = minibatch_iterator([X, y], minibatch_size, axis=0)
     valid_itr = minibatch_iterator([X, y], minibatch_size, axis=0)
-    TL = TrainingLoop(fit_function, cost_function,
-                      train_itr, valid_itr,
-                      checkpoint_dict=checkpoint_dict,
-                      list_of_train_output_names=["cost"],
-                      valid_output_name="valid_cost",
-                      n_epochs=1)
-    TL.run()
+    X_train, y_train = next(train_itr)
+    X_valid, y_valid = next(valid_itr)
+    fit_function(X_train, y_train)
+    cost_function(X_valid, y_valid)

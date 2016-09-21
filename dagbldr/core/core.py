@@ -4,21 +4,30 @@ try:
     from StringIO import StringIO
 except ImportError:
     from io import StringIO
+try:
+    import Queue
+except ImportError:
+    import queue as Queue
+try:
+    import urllib.request as urllib  # for backwards compatibility
+except ImportError:
+    import urllib2 as urllib
+try:
+    import cPickle as pickle
+except ImportError:
+    import pickle
+import copy
+import threading
 import logging
 import uuid
 from collections import OrderedDict
-
-# Author: Kyle Kastner
-# License: BSD 3-clause
+import socket
 import random
 import os
 import glob
 import subprocess
 import numpy as np
 from itertools import cycle
-
-# Author: Kyle Kastner
-# License: BSD 3-clause
 import __main__ as main
 import re
 import shutil
@@ -304,7 +313,7 @@ def make_word_level_from_text(text, tokenizer="default"):
     return cleaned, mapper_func, inverse_mapper_func, mapper
 
 
-def pickle(save_path, pickle_item):
+def dpickle(save_path, pickle_item):
     """ Simple wrapper for checkpoint dictionaries """
     old_recursion_limit = sys.getrecursionlimit()
     sys.setrecursionlimit(40000)
@@ -313,7 +322,7 @@ def pickle(save_path, pickle_item):
     sys.setrecursionlimit(old_recursion_limit)
 
 
-def unpickle(save_path):
+def dunpickle(save_path):
     """ Simple pickle wrapper for checkpoint dictionaries """
     old_recursion_limit = sys.getrecursionlimit()
     sys.setrecursionlimit(40000)
@@ -378,37 +387,6 @@ def set_shared_variables_in_function(func, list_of_values):
     shared_variables = [func.maker.inputs[i].variable
                         for i in shared_variable_indices]
     [s.set_value(v) for s, v in safe_zip(shared_variables, list_of_values)]
-
-
-def save_weights(save_weights_path, items_dict):
-    """ Save weights stored in functions contained in items_dict """
-    logger.info("Saving weights to %s" % save_weights_path)
-    weights_dict = {}
-    # k is the function name, v is a theano function
-    for k, v in items_dict.items():
-        if isinstance(v, theano.compile.function_module.Function):
-            # w is all the numpy values from a function
-            w = get_values_from_function(v)
-            for n, w_v in enumerate(w):
-                weights_dict[k + "_%i" % n] = w_v
-    if len(weights_dict.keys()) > 0:
-        np.savez(save_weights_path, **weights_dict)
-    else:
-        logger.info("Possible BUG: no theano functions found in items_dict, "
-                    "unable to save weights!")
-
-
-def save_results(save_path, results):
-    save_checkpoint(save_path, results)
-
-
-def save_checkpoint(save_path, pickle_item):
-    """ Simple wrapper for checkpoint dictionaries """
-    old_recursion_limit = sys.getrecursionlimit()
-    sys.setrecursionlimit(40000)
-    with open(save_path, mode="wb") as f:
-        dill.dump(pickle_item, f, protocol=-1)
-    sys.setrecursionlimit(old_recursion_limit)
 
 
 def load_checkpoint(saved_checkpoint_path):
@@ -587,41 +565,6 @@ def monitor_status_func(results_dict, append_name=None,
                               default_show=show_keys)
         if status_type == "checkpoint":
             cleanup_monitors("checkpoint", append_name)
-
-
-def old_checkpoint_status_func(checkpoint_dict, results,
-                               append_name=None, nan_check=True):
-    """ Saves a checkpoint dict """
-    checkpoint_dict = checkpoint_dict
-    checkpoint_dict["previous_results"] = results
-    nan_test = [(k, True) for k, e_v in results.items()
-                for v in e_v if np.isnan(v)]
-    if nan_check and len(nan_test) > 0:
-        nan_keys = set([tup[0] for tup in nan_test])
-        raise ValueError("Found NaN values in the following keys ",
-                         "%s, exiting training without saving" % nan_keys)
-
-    n_seen = max([len(l) for l in results.values()])
-    checkpoint_save_path = os.path.join(
-        get_checkpoint_dir(), "model_checkpoint_%i.pkl" % n_seen)
-    weight_save_path = os.path.join(
-        get_checkpoint_dir(), "model_weights_%i.npz" % n_seen)
-    results_save_path = os.path.join(
-        get_checkpoint_dir(), "model_results_%i.pkl" % n_seen)
-    if append_name is not None:
-        def mkpath(name):
-            split = name.split("_")
-            return "_".join(split[:-1] + [append_name] + split[-1:])
-        checkpoint_save_path = mkpath(checkpoint_save_path)
-        weight_save_path = mkpath(weight_save_path)
-        results_save_path = mkpath(results_save_path)
-    if not in_nosetest():
-        # Don't dump if testing!
-        save_checkpoint(checkpoint_save_path, checkpoint_dict)
-        save_weights(weight_save_path, checkpoint_dict)
-        save_results(results_save_path, results)
-        cleanup_checkpoints(append_name)
-    monitor_status_func(results, append_name=append_name)
 
 
 def checkpoint_status_func(training_loop, results,
@@ -860,7 +803,7 @@ def save_best_functions(train_function, valid_function, optimizer_object=None,
     if not in_nosetest():
         checkpoint_dir = get_checkpoint_dir()
         save_path = os.path.join(checkpoint_dir, fname)
-        pickle(save_path, {"train_function": train_function,
+        dpickle(save_path, {"train_function": train_function,
                            "valid_function": valid_function,
                            "optimizer_object": optimizer_object})
 
@@ -869,7 +812,7 @@ def load_best_functions(fname="__functions.pkl"):
     if not in_nosetest():
         checkpoint_dir = get_checkpoint_dir()
         save_path = os.path.join(checkpoint_dir, fname)
-        chk = unpickle(save_path)
+        chk = dunpickle(save_path)
         return (chk["train_function"], chk["valid_function"],
                 chk["optimizer_object"])
 
@@ -878,259 +821,20 @@ def save_best_results(results, fname="__results.pkl"):
     if not in_nosetest():
         checkpoint_dir = get_checkpoint_dir()
         save_path = os.path.join(checkpoint_dir, fname)
-        pickle(save_path, results)
+        dpickle(save_path, results)
 
 
 def load_best_results(fname="__results.pkl"):
     if not in_nosetest():
         checkpoint_dir = get_checkpoint_dir()
         save_path = os.path.join(checkpoint_dir, fname)
-        return unpickle(save_path)
+        return dunpickle(save_path)
 
 
 def init_results_dict():
     results = defaultdict(list)
     results["total_number_of_epochs_auto"] = [0]
     return results
-
-
-class TrainingLoop(object):
-    def __init__(self, train_function, valid_function,
-                 train_iterator, valid_iterator,
-                 monitor_function=None,
-                 monitor_iterator="valid",
-                 checkpoint_dict=None,
-                 list_of_train_output_names=None,
-                 valid_output_name=None,
-                 valid_frequency=100,
-                 monitor_frequency=100,
-                 n_epochs=100,
-                 optimizer_object=None,
-                 previous_results=None,
-                 verbose=False):
-        """
-        Custom functions for train_function or valid_function *must* return
-        a list!
-        """
-        self.train_function = train_function
-        self.valid_function = valid_function
-        self.train_iterator = train_iterator
-        self.valid_iterator = valid_iterator
-        self.monitor_function = monitor_function
-        self.monitor_iterator = monitor_iterator
-        self.checkpoint_dict = checkpoint_dict
-        self.list_of_train_output_names = list_of_train_output_names
-        self.valid_output_name = valid_output_name
-        self.monitor_frequency = monitor_frequency
-        self.valid_frequency = valid_frequency
-        self.n_epochs = n_epochs
-        self.optimizer_object = optimizer_object
-        self.previous_results = previous_results
-        self.verbose = verbose
-
-    def run(self):
-        return self._run()
-
-    def _run(self):
-        train_function = self.train_function
-        valid_function = self.valid_function
-        train_iterator = self.train_iterator
-        valid_iterator = self.valid_iterator
-        monitor_function = self.monitor_function
-        monitor_iterator = self.monitor_iterator
-        monitor_frequency = self.monitor_frequency
-        checkpoint_dict = self.checkpoint_dict
-        list_of_train_output_names = self.list_of_train_output_names
-        valid_output_name = self.valid_output_name
-        valid_frequency = self.valid_frequency
-        n_epochs = self.n_epochs
-        optimizer_object = self.optimizer_object
-        previous_results = self.previous_results
-        verbose = self.verbose
-        if previous_results is not None:
-            raise ValueError("previous_results argument no longer supported! "
-                             "checkpoint_dict should contain this information.")
-
-        if "previous_results" in checkpoint_dict.keys():
-            previous_results = checkpoint_dict["previous_results"]
-        else:
-            logger.info("previous_results not found in checkpoint_dict.keys() "
-                        "creating new storage for previous_results")
-            previous_results = defaultdict(list)
-
-        assert valid_frequency >= 1
-        assert monitor_frequency >= 1
-        train_minibatch_size = train_iterator.minibatch_size
-        valid_minibatch_size = valid_iterator.minibatch_size
-
-        if not in_nosetest():
-            archive_dagbldr()
-            # add calling commandline arguments here...
-
-        if len(previous_results.keys()) != 0:
-            last_epoch_count = previous_results[
-                "total_number_of_epochs_auto"][-1]
-        else:
-            last_epoch_count = 0
-
-        results = init_results_dict()
-        total_train_minibatch_count = 0
-        total_valid_minibatch_count = 0
-        # print parameter info
-        logger.info("-------------------")
-        logger.info("Parameter name list")
-        logger.info("-------------------")
-        for key in _lib_shared_params.keys():
-            logger.info(key)
-        logger.info("-------------------")
-        global_start = time.time()
-        previous_validation_time = time.time()
-        for e in range(n_epochs):
-            new_epoch_count = last_epoch_count + 1
-            try:
-                # Iterate through train minibatches until StopIteration
-                while True:
-                    list_of_train_args = next(train_iterator)
-                    train_minibatch_results = train_function(
-                        *list_of_train_args)
-                    total_train_minibatch_count += 1
-                    for n, k in enumerate(train_minibatch_results):
-                        if list_of_train_output_names is not None:
-                            assert len(list_of_train_output_names) == len(
-                                train_minibatch_results)
-                            results[list_of_train_output_names[n]].append(
-                                train_minibatch_results[n])
-                        else:
-                            results[n].append(train_minibatch_results[n])
-
-                    if total_train_minibatch_count % valid_frequency == 0:
-                        logger.info("Computing validation at "
-                              "minibatch %i" % total_train_minibatch_count)
-                        valid_results = defaultdict(list)
-                        try:
-                            # Iterate through valid minibatches to StopIteration
-                            while True:
-                                list_of_valid_args = next(valid_iterator)
-                                valid_minibatch_results = valid_function(
-                                    *list_of_valid_args)
-                                total_valid_minibatch_count += 1
-                                valid_results[valid_output_name] += valid_minibatch_results
-                        except StopIteration:
-                            pass
-
-                        # Monitoring output
-                        output = {r: np.mean(results[r]) for r in results.keys()}
-                        valid_cost = np.mean(valid_results[valid_output_name])
-                        current_validation_time = time.time()
-
-                        output["train_total_sample_count_auto"] = total_train_minibatch_count * train_minibatch_size
-                        output["train_total_minibatch_count_auto"] = total_train_minibatch_count
-                        output["train_minibatch_size_auto"] = train_minibatch_size
-
-                        output["valid_total_sample_count_auto"] = total_valid_minibatch_count * valid_minibatch_size
-                        output["valid_total_minibatch_count_auto"] = total_valid_minibatch_count
-                        output["valid_minibatch_size_auto"] = valid_minibatch_size
-
-                        output["start_time_s_auto"] = global_start
-                        output["current_time_s_auto"] = current_validation_time
-                        output["total_run_time_s_auto"] = current_validation_time - global_start
-
-                        output["time_since_last_validation_s_auto"] = current_validation_time - previous_validation_time
-                        previous_validation_time = current_validation_time
-
-                        output["total_number_of_epochs_auto"] = new_epoch_count
-                        for k in output.keys():
-                            previous_results[k].append(output[k])
-
-                        if checkpoint_dict is not None:
-                            # Quick trick to avoid 0 length list
-                            old = min(
-                                previous_results[valid_output_name] + [np.inf])
-                            previous_results[valid_output_name].append(valid_cost)
-                            new = min(previous_results[valid_output_name])
-                            if new < old:
-                                logger.info("Saving checkpoint based on validation score")
-                                checkpoint_status_func(self, previous_results,
-                                                       append_name="best")
-                                save_best_functions(train_function, valid_function,
-                                                     optimizer_object)
-                                save_best_results(previous_results)
-                            else:
-                                checkpoint_status_func(self, previous_results)
-                        results = init_results_dict()
-
-                    if total_train_minibatch_count % monitor_frequency == 0:
-                        if monitor_function is not None:
-                            logger.info("Running monitor at "
-                                        "update %i" % total_train_minibatch_count)
-                            if monitor_iterator == "valid":
-                                # Iterate through monitor til StopIteration
-                                try:
-                                    while True:
-                                        list_of_valid_args = next(
-                                            valid_iterator)
-                                        monitor_results = monitor_function(
-                                            *list_of_valid_args)
-                                except StopIteration:
-                                    pass
-                            else:
-                                raise ValueError("Unhandled monitor_iterator")
-
-            except StopIteration:
-                last_epoch_count = new_epoch_count
-        return previous_results
-
-
-def get_js_path():
-    module_path = os.path.dirname(__file__)
-    js_path = os.path.join(module_path, "js_plot_dependencies")
-    return js_path
-
-
-def filled_js_template_from_results_dict(results_dict, default_show="all"):
-    # Uses arbiter strings in the template to split the template and stick
-    # values in
-    js_path = get_js_path()
-    template_path = os.path.join(js_path, "template.html")
-    f = open(template_path, mode='r')
-    all_template_lines = f.readlines()
-    f.close()
-    imports_split_index = [n for n, l in enumerate(all_template_lines)
-                           if "IMPORTS_SPLIT" in l][0]
-    data_split_index = [n for n, l in enumerate(all_template_lines)
-                        if "DATA_SPLIT" in l][0]
-    first_part = all_template_lines[:imports_split_index]
-    imports_part = []
-    js_files_path = os.path.join(js_path, "js")
-    js_file_names = ["jquery-1.9.1.js", "knockout-3.0.0.js",
-                     "highcharts.js", "exporting.js"]
-    js_files = [os.path.join(js_files_path, jsf) for jsf in js_file_names]
-    for js_file in js_files:
-        with open(js_file, "r") as f:
-            imports_part.extend(
-                ["<script>\n"] + f.readlines() + ["</script>\n"])
-    post_imports_part = all_template_lines[
-        imports_split_index + 1:data_split_index]
-    last_part = all_template_lines[data_split_index + 1:]
-
-    def gen_js_field_for_key_value(key, values, show=True):
-        assert type(values) is list
-        if isinstance(values[0], (np.generic, np.ndarray)):
-            values = [float(v.ravel()) for v in values]
-        maxlen = 1500
-        if len(values) > maxlen:
-            values = list(np.interp(np.linspace(0, len(values), maxlen),
-                          np.arange(len(values)), values))
-        show_key = "true" if show else "false"
-        return "{\n    name: '%s',\n    data: %s,\n    visible: %s\n},\n" % (
-            str(key), str(values), show_key)
-    data_part = [gen_js_field_for_key_value(k, results_dict[k], True)
-                 if k in default_show or default_show == "all"
-                 else gen_js_field_for_key_value(k, results_dict[k], False)
-                 for k in sorted(results_dict.keys())]
-    all_filled_lines = first_part + imports_part + post_imports_part
-    all_filled_lines = all_filled_lines + data_part + last_part
-    return all_filled_lines
 
 
 def plot_training_epochs(epochs_dict, plot_name, plot_limit=None,
@@ -1241,3 +945,775 @@ def make_gif(arr, gif_name, plot_width, plot_height, resize_scale_width=5,
     filelist = glob.glob("__*giftmp_%s.png" % pre)
     for f in filelist:
         os.remove(f)
+
+
+def get_resource_dir(name, resource_dir=None, folder=None, create_dir=True):
+    """ Get dataset directory path """
+    if not resource_dir:
+        resource_dir = os.getenv("DAGBLDR_MODELS", os.path.join(
+            os.path.expanduser("~"), "dagbldr_models"))
+    if folder is None:
+        resource_dir = os.path.join(resource_dir, name)
+    else:
+        resource_dir = os.path.join(resource_dir, folder)
+    if create_dir:
+        if not os.path.exists(resource_dir):
+            os.makedirs(resource_dir)
+    return resource_dir
+
+
+def get_script_name():
+    script_path = os.path.abspath(sys.argv[0])
+    # Assume it ends with .py ...
+    script_name = script_path.split(os.sep)[-1]
+    return script_name
+
+
+def archive(tag=None):
+    script_name = get_script_name()[:-3]
+    save_path = get_resource_dir(script_name)
+    if tag is None:
+        save_script_path = os.path.join(save_path, get_script_name())
+    else:
+        save_script_path = os.path.join(save_path, tag + "_" + get_script_name())
+
+    logger.info("Saving code archive for %s" % (save_path))
+    script_location = os.path.abspath(sys.argv[0])
+    shutil.copy2(script_location, save_script_path)
+
+    lib_location = os.path.realpath(__file__)
+    lib_name = lib_location.split(os.sep)[-1]
+    if tag is None:
+        save_lib_path = os.path.join(save_path, lib_name)
+    else:
+        save_lib_path = os.path.join(save_path, tag + "_" + lib_name)
+    shutil.copy2(lib_location, save_lib_path)
+
+
+def coroutine(func):
+    def start(*args,**kwargs):
+        cr = func(*args,**kwargs)
+        cr.next()
+        return cr
+    return start
+
+
+def save_weights(save_path, items_dict, use_resource_dir=True):
+    logger.info("Not saving weights due to copy issues in npz")
+    return
+    weights_dict = {}
+    # k is the function name, v is a theano function
+    for k, v in items_dict.items():
+        if isinstance(v, theano.compile.function_module.Function):
+            # w is all the numpy values from a function
+            w = get_values_from_function(v)
+            for n, w_v in enumerate(w):
+                weights_dict[k + "_%i" % n] = w_v
+    if use_resource_dir:
+        # Assume it ends with .py ...
+        script_name = get_script_name()[:-3]
+        save_path = os.path.join(get_resource_dir(script_name), save_path)
+    logger.info("Saving weights to %s" % save_weights_path)
+    if len(weights_dict.keys()) > 0:
+        np.savez(save_path, **weights_dict)
+    else:
+        logger.info("Possible BUG: no theano functions found in items_dict, "
+              "unable to save weights!")
+    logger.info("Weight saving complete %s" % save_path)
+
+
+def download(url, server_fname, local_fname=None, progress_update_percentage=5,
+             bypass_certificate_check=False):
+    """
+    An internet download utility modified from
+    http://stackoverflow.com/questions/22676/
+    how-do-i-download-a-file-over-http-using-python/22776#22776
+    """
+    if bypass_certificate_check:
+        import ssl
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        u = urllib.urlopen(url, context=ctx)
+    else:
+        u = urllib.urlopen(url)
+    if local_fname is None:
+        local_fname = server_fname
+    full_path = local_fname
+    meta = u.info()
+    with open(full_path, 'wb') as f:
+        try:
+            file_size = int(meta.get("Content-Length"))
+        except TypeError:
+            logger.info("WARNING: Cannot get file size, displaying bytes instead!")
+            file_size = 100
+        logger.info("Downloading: %s Bytes: %s" % (server_fname, file_size))
+        file_size_dl = 0
+        block_sz = int(1E7)
+        p = 0
+        while True:
+            buffer = u.read(block_sz)
+            if not buffer:
+                break
+            file_size_dl += len(buffer)
+            f.write(buffer)
+            if (file_size_dl * 100. / file_size) > p:
+                status = r"%10d  [%3.2f%%]" % (file_size_dl, file_size_dl *
+                                               100. / file_size)
+                logger.info(status)
+                p += progress_update_percentage
+
+
+
+def filled_js_template_from_results_dict(results_dict, default_show="all"):
+    # Uses arbiter strings in the template to split the template and stick
+    # values in
+    partial_path = get_resource_dir("js_plot_dependencies")
+    full_path = os.path.join(partial_path, "master.zip")
+    url = "http://github.com/kastnerkyle/simple_template_plotter/archive/master.zip"
+    if not os.path.exists(full_path):
+        logger.info("Downloading plotter template code from %s" % url)
+        download(url, full_path)
+        zip_ref = zipfile.ZipFile(full_path, 'r')
+        zip_ref.extractall(partial_path)
+        zip_ref.close()
+
+    js_path = os.path.join(partial_path, "simple_template_plotter-master")
+    template_path =  os.path.join(js_path, "template.html")
+    f = open(template_path, mode='r')
+    all_template_lines = f.readlines()
+    f.close()
+    imports_split_index = [n for n, l in enumerate(all_template_lines)
+                           if "IMPORTS_SPLIT" in l][0]
+    data_split_index = [n for n, l in enumerate(all_template_lines)
+                        if "DATA_SPLIT" in l][0]
+    log_split_index = [n for n, l in enumerate(all_template_lines)
+                       if "LOGGING_SPLIT" in l][0]
+    first_part = all_template_lines[:imports_split_index]
+    imports_part = []
+    js_files_path = os.path.join(js_path, "js")
+    js_file_names = ["jquery-1.9.1.js", "knockout-3.0.0.js",
+                     "highcharts.js", "exporting.js"]
+    js_files = [os.path.join(js_files_path, jsf) for jsf in js_file_names]
+    for js_file in js_files:
+        with open(js_file, "r") as f:
+            imports_part.extend(
+                ["<script>\n"] + f.readlines() + ["</script>\n"])
+    post_imports_part = all_template_lines[
+        imports_split_index + 1:data_split_index]
+    log_part = all_template_lines[data_split_index + 1:log_split_index]
+    last_part = all_template_lines[log_split_index + 1:]
+
+    def gen_js_field_for_key_value(key, values, show=True):
+        assert type(values) is list
+        if isinstance(values[0], (np.generic, np.ndarray)):
+            values = [float(v.ravel()) for v in values]
+        maxlen = 1500
+        if len(values) > maxlen:
+            values = list(np.interp(np.linspace(0, len(values), maxlen),
+                          np.arange(len(values)), values))
+        show_key = "true" if show else "false"
+        return "{\n    name: '%s',\n    data: %s,\n    visible: %s\n},\n" % (
+            str(key), str(values), show_key)
+    data_part = [gen_js_field_for_key_value(k, results_dict[k], True)
+                 if k in default_show or default_show == "all"
+                 else gen_js_field_for_key_value(k, results_dict[k], False)
+                 for k in sorted(results_dict.keys())]
+    all_filled_lines = first_part + imports_part + post_imports_part
+    all_filled_lines = all_filled_lines + data_part + log_part
+    # add logging output
+    tmp = copy.copy(string_f)
+    tmp.seek(0)
+    log_output = tmp.readlines()
+    del tmp
+    all_filled_lines = all_filled_lines + log_output + last_part
+    return all_filled_lines
+
+
+def save_results_as_html(save_path, results_dict, use_resource_dir=True,
+                         default_no_show="_auto"):
+    show_keys = [k for k in results_dict.keys()
+                 if default_no_show not in k]
+    as_html = filled_js_template_from_results_dict(
+        results_dict, default_show=show_keys)
+    if use_resource_dir:
+        # Assume it ends with .py ...
+        script_name = get_script_name()[:-3]
+        save_path = os.path.join(get_resource_dir(script_name), save_path)
+    logger.info("Saving HTML results %s" % save_path)
+    with open(save_path, "w") as f:
+        f.writelines(as_html)
+    logger.info("Completed HTML results saving %s" % save_path)
+
+
+@coroutine
+def threaded_html_writer(maxsize=25):
+    """
+    Expects to be sent a tuple of (save_path, results_dict)
+    """
+    messages = Queue.PriorityQueue(maxsize=maxsize)
+    def run_thread():
+        while True:
+            p, item = messages.get()
+            if item is GeneratorExit:
+                return
+            else:
+                save_path, results_dict = item
+                save_results_as_html(save_path, results_dict)
+    threading.Thread(target=run_thread).start()
+    try:
+        n = 0
+        while True:
+            item = (yield)
+            messages.put((n, item))
+            n -= 1
+    except GeneratorExit:
+        messages.put((1, GeneratorExit))
+
+
+@coroutine
+def threaded_weights_writer(maxsize=25):
+    """
+    Expects to be sent a tuple of (save_path, checkpoint_dict)
+    """
+    messages = Queue.PriorityQueue(maxsize=maxsize)
+    def run_thread():
+        while True:
+            p, item = messages.get()
+            if item is GeneratorExit:
+                return
+            else:
+                save_path, items_dict = item
+                save_weights(save_path, items_dict)
+    threading.Thread(target=run_thread).start()
+    try:
+        n = 0
+        while True:
+            item = (yield)
+            messages.put((n, item))
+            n -= 1
+    except GeneratorExit:
+        messages.put((1, GeneratorExit))
+
+
+def save_checkpoint(save_path, pickle_item, use_resource_dir=True):
+    if use_resource_dir:
+        # Assume it ends with .py ...
+        script_name = get_script_name()[:-3]
+        save_path = os.path.join(get_resource_dir(script_name), save_path)
+    sys.setrecursionlimit(40000)
+    logger.info("Saving checkpoint to %s" % save_path)
+    with open(save_path, mode="wb") as f:
+        dill.dump(pickle_item, f, protocol=-1)
+    logger.info("Checkpoint saving complete %s" % save_path)
+
+
+@coroutine
+def threaded_checkpoint_writer(maxsize=25):
+    """
+    Expects to be sent a tuple of (save_path, checkpoint_dict)
+    """
+    messages = Queue.PriorityQueue(maxsize=maxsize)
+    def run_thread():
+        while True:
+            p, item = messages.get()
+            if item is GeneratorExit:
+                return
+            else:
+                save_path, pickle_item = item
+                save_checkpoint(save_path, pickle_item)
+    threading.Thread(target=run_thread).start()
+    try:
+        n = 0
+        while True:
+            item = (yield)
+            messages.put((n, item))
+            n -= 1
+    except GeneratorExit:
+        messages.put((1, GeneratorExit))
+
+
+class TrainingLoop(object):
+    """
+    Runs the loop - thin wrapper for serializing
+
+    Named in reference to https://www.reddit.com/r/MachineLearning/comments/4kd1qp/good_code_to_learn_from/d3e2irr
+    """
+    def __init__(self, train_loop_function, train_function, train_itr,
+                 valid_loop_function, valid_function, valid_itr,
+                 n_epochs, checkpoint_dict,
+                 checkpoint_delay=10,
+                 checkpoint_every_n_epochs=1,
+                 checkpoint_every_n_updates=np.inf,
+                 checkpoint_every_n_seconds=np.inf,
+                 monitor_frequency=1000,
+                 skip_minimums=False,
+                 skip_intermediates=True,
+                 skip_most_recents=False):
+        self.train_loop_function = train_loop_function
+        self.train_function = train_function
+        self.train_itr = train_itr
+
+        self.valid_loop_function = valid_loop_function
+        self.valid_function = valid_function
+        self.valid_itr = valid_itr
+
+        self.n_epochs = n_epochs
+        self.checkpoint_dict = checkpoint_dict
+
+        # These parameters should be serialized
+        self.checkpoint_delay = checkpoint_delay
+        self.checkpoint_every_n_epochs = checkpoint_every_n_epochs
+        self.checkpoint_every_n_updates = checkpoint_every_n_updates
+        self.checkpoint_every_n_seconds = checkpoint_every_n_seconds
+        self.monitor_frequency = monitor_frequency
+        self.skip_minimums = skip_minimums
+        self.skip_intermediates = skip_intermediates
+        self.skip_most_recents = skip_most_recents
+
+        # tracker to ensure restarting at the correct minibatch
+        self.num_train_minibatches_run = -1
+
+    def __getstate__(self):
+        skiplist = [self.train_loop_function,
+                    self.train_function,
+                    self.train_itr,
+                    self.valid_loop_function,
+                    self.valid_function,
+                    self.valid_itr,
+                    self.n_epochs,
+                    self.checkpoint_dict]
+        return {k:v for k, v in self.__dict__.items() if v not in skiplist}
+
+    def refresh(self, train_loop_function, train_function, train_itr,
+                valid_loop_function, valid_function, valid_itr,
+                n_epochs,
+                checkpoint_dict):
+        # Must refresh after reloading from pkl
+        self.train_loop_function = train_loop_function
+        self.train_function = train_function
+        self.train_itr = train_itr
+
+        self.valid_loop_function = valid_loop_function
+        self.valid_function = valid_function
+        self.valid_itr = valid_itr
+        self.n_epochs = n_epochs
+        self.checkpoint_dict = checkpoint_dict
+
+    def run(self):
+        run_loop(self.train_loop_function, self.train_function, self.train_itr,
+                 self.valid_loop_function, self.valid_function, self.valid_itr,
+                 self.n_epochs,
+                 self.checkpoint_dict,
+                 self.checkpoint_delay,
+                 self.checkpoint_every_n_epochs,
+                 self.checkpoint_every_n_updates,
+                 self.checkpoint_every_n_seconds,
+                 self.monitor_frequency,
+                 self.skip_minimums,
+                 self.skip_intermediates,
+                 self.skip_most_recents,
+                 self.num_train_minibatches_run,
+                 self)
+
+
+def run_loop(train_loop_function, train_function, train_itr,
+             valid_loop_function, valid_function, valid_itr,
+             n_epochs, checkpoint_dict,
+             checkpoint_delay=10, checkpoint_every_n_epochs=1,
+             checkpoint_every_n_updates=np.inf,
+             checkpoint_every_n_seconds=np.inf,
+             monitor_frequency=1000, skip_minimums=False,
+             skip_intermediates=True, skip_most_recents=False,
+             skip_n_train_minibatches=-1,
+             stateful_object=None):
+    """
+    TODO: add all logging info into the js report
+    TODO: add upload fields to add data to an html and save a copy
+    loop function should return a list of costs
+    stateful_object allows to serialize and relaunch in middle of an epoch
+    for long training models
+    """
+    logger.info("Running loop...")
+    # Assume keys which are theano functions to ignore!
+    ignore_keys = [k for k, v in checkpoint_dict.items()
+                   if isinstance(v, theano.compile.function_module.Function)]
+
+    train_loop = train_loop_function
+    valid_loop = valid_loop_function
+    ident = str(uuid.uuid4())[:8]
+    random_state = np.random.RandomState(2177)
+    monitor_prob = 1. / monitor_frequency
+
+    non_ignored_keys = [k for k in checkpoint_dict.keys()
+                        if k not in ignore_keys]
+    if len(non_ignored_keys) > 0:
+        overall_train_costs = checkpoint_dict["train_costs"]
+        overall_valid_costs = checkpoint_dict["valid_costs"]
+        # Auto tracking times
+        overall_epoch_deltas = checkpoint_dict["epoch_deltas_auto"]
+        overall_epoch_times = checkpoint_dict["epoch_times_auto"]
+        overall_train_deltas = checkpoint_dict["train_deltas_auto"]
+        overall_train_times = checkpoint_dict["train_times_auto"]
+        overall_valid_deltas = checkpoint_dict["valid_deltas_auto"]
+        overall_valid_times = checkpoint_dict["valid_times_auto"]
+        overall_checkpoint_deltas = checkpoint_dict["checkpoint_deltas_auto"]
+        overall_checkpoint_times = checkpoint_dict["checkpoint_times_auto"]
+        overall_joint_deltas = checkpoint_dict["joint_deltas_auto"]
+        overall_joint_times = checkpoint_dict["joint_times_auto"]
+        overall_train_checkpoint = checkpoint_dict["train_checkpoint_auto"]
+        overall_valid_checkpoint = checkpoint_dict["valid_checkpoint_auto"]
+        keys_checked = ["train_costs",
+                        "valid_costs",
+                        "epoch_deltas_auto",
+                        "epoch_times_auto",
+                        "train_deltas_auto",
+                        "train_times_auto",
+                        "valid_deltas_auto",
+                        "valid_times_auto",
+                        "checkpoint_deltas_auto",
+                        "checkpoint_times_auto",
+                        "joint_deltas_auto",
+                        "joint_times_auto",
+                        "train_checkpoint_auto",
+                        "valid_checkpoint_auto"]
+        not_handled = [k for k in checkpoint_dict.keys()
+                       if k not in keys_checked and k not in ignore_keys]
+        if len(not_handled) > 0:
+            raise ValueError("Unhandled keys %s in checkpoint_dict, exiting..." % not_handled)
+
+        epoch_time_total = overall_epoch_times[-1]
+        train_time_total = overall_train_times[-1]
+        valid_time_total = overall_valid_times[-1]
+        checkpoint_time_total = overall_checkpoint_times[-1]
+        joint_time_total = overall_joint_times[-1]
+
+        start_epoch = len(overall_train_costs)
+    else:
+        overall_train_costs = []
+        overall_valid_costs = []
+        overall_train_checkpoint = []
+        overall_valid_checkpoint = []
+
+        epoch_time_total = 0
+        train_time_total = 0
+        valid_time_total = 0
+        checkpoint_time_total = 0
+        joint_time_total = 0
+        overall_epoch_times = []
+        overall_epoch_deltas = []
+        overall_train_times = []
+        overall_train_deltas = []
+        overall_valid_times = []
+        overall_valid_deltas = []
+        # Add zeros to avoid errors
+        overall_checkpoint_times = [0]
+        overall_checkpoint_deltas = [0]
+        overall_joint_times = [0]
+        overall_joint_deltas = [0]
+
+        start_epoch = 0
+
+    # save current state of lib and calling script
+    archive_dagbldr()
+
+    tcw = threaded_checkpoint_writer()
+    tww = threaded_weights_writer()
+    thw = threaded_html_writer()
+
+    best_train_checkpoint_pickle = None
+    best_train_checkpoint_epoch = 0
+    best_valid_checkpoint_pickle = None
+    best_train_checkpoint_epoch = 0
+    # If there are more than 1M minibatches per epoch this will break!
+    # Not reallocating buffer greatly helps fast training models though
+    # Also we have bigger problems if there are 1M minibatches per epoch...
+    # This will get sliced down to the correct number of minibatches down below
+    train_costs = [0.] * 1000000
+    valid_costs = [0.] * 1000000
+    try:
+        for e in range(start_epoch, start_epoch + n_epochs):
+            joint_start = time.time()
+            epoch_start = time.time()
+            logger.info(" ")
+            logger.info("Starting training, epoch %i" % e)
+            logger.info(" ")
+            train_mb_count = 0
+            valid_mb_count = 0
+            results_dict = {k: v for k, v in checkpoint_dict.items()
+                            if k not in ignore_keys}
+            this_results_dict = results_dict
+            try:
+                # train loop
+                train_start = time.time()
+                last_time_checkpoint = train_start
+                while True:
+                    if train_mb_count < skip_n_train_minibatches:
+                        train_mb_count += 1
+                        continue
+                    partial_train_costs = train_loop(train_function, train_itr)
+                    train_costs[train_mb_count] = np.mean(partial_train_costs)
+                    tc = train_costs[train_mb_count]
+                    if np.isnan(tc):
+                        logger.info("NaN detected in train cost, update %i" % train_mb_count)
+                        raise StopIteration("NaN detected in train")
+
+                    train_mb_count += 1
+                    if (train_mb_count % checkpoint_every_n_updates) == 0:
+                        checkpoint_save_path = "%s_model_update_checkpoint_%i.pkl" % (ident, train_mb_count)
+                        weights_save_path = "%s_model_update_weights_%i.npz" % (ident, train_mb_count)
+                        results_save_path = "%s_model_update_results_%i.html" % (ident, train_mb_count)
+                        # Use pickle to preserve relationships between keys
+                        # while still copying buffers
+                        copy_pickle = pickle.dumps(checkpoint_dict)
+                        copy_dict = pickle.loads(copy_pickle)
+                        tcw.send((checkpoint_save_path, copy_dict))
+                        tww.send((weights_save_path, copy_dict))
+                        logger.info(" ")
+                        logger.info("Update checkpoint after train mb %i" % train_mb_count)
+                        logger.info("Current mean cost %f" % np.mean(partial_train_costs))
+                        logger.info(" ")
+                        this_results_dict["this_epoch_train_auto"] = train_costs[:train_mb_count]
+                        tmb = train_costs[:train_mb_count]
+                        running_train_mean = np.cumsum(tmb) / (np.arange(train_mb_count) + 1)
+                        # needs to be a list
+                        running_train_mean = list(running_train_mean)
+                        this_results_dict["this_epoch_train_mean_auto"] = running_train_mean
+                        thw.send((results_save_path, this_results_dict))
+                        if stateful_object is not None:
+                            stateful_object.num_train_minibatches_run = train_mb_count
+                            object_save_path = "%s_model_update_object_%i.pkl" % (ident, train_mb_count)
+                            save_checkpoint(object_save_path, stateful_object)
+                    elif (time.time() - last_time_checkpoint) >= checkpoint_every_n_seconds:
+                        time_diff = time.time() - train_start
+                        last_time_checkpoint = time.time()
+                        checkpoint_save_path = "%s_model_time_checkpoint_%i.pkl" % (ident, int(time_diff))
+                        weights_save_path = "%s_model_time_weights_%i.npz" % (ident, int(time_diff))
+                        results_save_path = "%s_model_time_results_%i.html" % (ident, int(time_diff))
+                        # Use pickle to preserve relationships between keys
+                        # while still copying buffers
+                        copy_pickle = pickle.dumps(checkpoint_dict)
+                        copy_dict = pickle.loads(copy_pickle)
+                        tcw.send((checkpoint_save_path, copy_dict))
+                        tww.send((weights_save_path, copy_dict))
+                        logger.info(" ")
+                        logger.info("Time checkpoint after train mb %i" % train_mb_count)
+                        logger.info("Current mean cost %f" % np.mean(partial_train_costs))
+                        logger.info(" ")
+                        this_results_dict["this_epoch_train_auto"] = train_costs[:train_mb_count]
+                        tmb = train_costs[:train_mb_count]
+                        running_train_mean = np.cumsum(tmb) / (np.arange(train_mb_count) + 1)
+                        # needs to be a list
+                        running_train_mean = list(running_train_mean)
+                        this_results_dict["this_epoch_train_mean_auto"] = running_train_mean
+                        thw.send((results_save_path, this_results_dict))
+                        if stateful_object is not None:
+                            stateful_object.num_train_minibatches_run = train_mb_count
+                            object_save_path = "%s_model_time_object_%i.pkl" % (ident, int(time_diff))
+                            save_checkpoint(object_save_path, stateful_object)
+                    draw = random_state.rand()
+                    if draw < monitor_prob and not skip_intermediates:
+                        logger.info(" ")
+                        logger.info("Starting train mb %i" % train_mb_count)
+                        logger.info("Current mean cost %f" % np.mean(partial_train_costs))
+                        logger.info(" ")
+                        results_save_path = "%s_intermediate_results.html" % ident
+                        this_results_dict["this_epoch_train_auto"] = train_costs[:train_mb_count]
+                        thw.send((results_save_path, this_results_dict))
+            except StopIteration:
+                # Slice so that only valid data is in the minibatch
+                # this also assumes there is not a variable number
+                # of minibatches in an epoch!
+                train_stop = time.time()
+                train_costs = train_costs[:train_mb_count]
+                logger.info(" ")
+                logger.info("Starting validation, epoch %i" % e)
+                logger.info(" ")
+                valid_start = time.time()
+                try:
+                    # Valid loop
+                    while True:
+                        partial_valid_costs = valid_loop(valid_function, valid_itr)
+                        valid_costs[valid_mb_count] = np.mean(partial_valid_costs)
+                        vc = valid_costs[valid_mb_count]
+                        if np.isnan(vc):
+                            logger.info("NaN detected in valid cost, minibatch %i" % valid_mb_count)
+                            raise StopIteration("NaN detected in valid")
+                        valid_mb_count += 1
+                        draw = random_state.rand()
+                        if draw < monitor_prob and not skip_intermediates:
+                            logger.info(" ")
+                            logger.info("Valid mb %i" % valid_mb_count)
+                            logger.info("Current validation mean cost %f" % np.mean(
+                                valid_costs))
+                            logger.info(" ")
+                            results_save_path = "%s_intermediate_results.html" % ident
+                            this_results_dict["this_epoch_valid_auto"] = valid_costs[:valid_mb_count]
+                            thw.send((results_save_path, this_results_dict))
+                except StopIteration:
+                    pass
+                logger.info(" ")
+                valid_stop = time.time()
+                epoch_stop = time.time()
+                valid_costs = valid_costs[:valid_mb_count]
+
+                # Logging and tracking training statistics
+                epoch_time_delta = epoch_stop - epoch_start
+                epoch_time_total += epoch_time_delta
+                overall_epoch_deltas.append(epoch_time_delta)
+                overall_epoch_times.append(epoch_time_total)
+
+                train_time_delta = train_stop - train_start
+                train_time_total += train_time_delta
+                overall_train_deltas.append(train_time_delta)
+                overall_train_times.append(train_time_total)
+
+                valid_time_delta = valid_stop - valid_start
+                valid_time_total += valid_time_delta
+                overall_valid_deltas.append(valid_time_delta)
+                overall_valid_times.append(valid_time_total)
+
+                mean_epoch_train_cost = np.mean(train_costs)
+                # np.inf trick to avoid taking the min of length 0 list
+                old_min_train_cost = min(overall_train_costs + [np.inf])
+                if np.isnan(mean_epoch_train_cost):
+                    logger.info("Previous train costs %s" % overall_train_costs[-5:])
+                    logger.info("NaN detected in train cost, epoch %i" % e)
+                    raise StopIteration("NaN detected in train")
+                overall_train_costs.append(mean_epoch_train_cost)
+
+                mean_epoch_valid_cost = np.mean(valid_costs)
+                old_min_valid_cost = min(overall_valid_costs + [np.inf])
+                if np.isnan(mean_epoch_valid_cost):
+                    logger.info("Previous valid costs %s" % overall_valid_costs[-5:])
+                    logger.info("NaN detected in valid cost, epoch %i" % e)
+                    raise StopIteration("NaN detected in valid")
+                overall_valid_costs.append(mean_epoch_valid_cost)
+
+                if mean_epoch_train_cost < old_min_train_cost:
+                    overall_train_checkpoint.append(mean_epoch_train_cost)
+                else:
+                    overall_train_checkpoint.append(old_min_train_cost)
+
+                if mean_epoch_valid_cost < old_min_valid_cost:
+                    overall_valid_checkpoint.append(mean_epoch_valid_cost)
+                else:
+                    overall_valid_checkpoint.append(old_min_valid_cost)
+
+                checkpoint_dict["train_costs"] = overall_train_costs
+                checkpoint_dict["valid_costs"] = overall_valid_costs
+                # Auto tracking times
+                checkpoint_dict["epoch_deltas_auto"] = overall_epoch_deltas
+                checkpoint_dict["epoch_times_auto"] = overall_epoch_times
+                checkpoint_dict["train_deltas_auto"] = overall_train_deltas
+                checkpoint_dict["train_times_auto"] = overall_train_times
+                checkpoint_dict["valid_deltas_auto"] = overall_valid_deltas
+                checkpoint_dict["valid_times_auto"] = overall_valid_times
+                checkpoint_dict["checkpoint_deltas_auto"] = overall_checkpoint_deltas
+                checkpoint_dict["checkpoint_times_auto"] = overall_checkpoint_times
+                checkpoint_dict["joint_deltas_auto"] = overall_joint_deltas
+                checkpoint_dict["joint_times_auto"] = overall_joint_times
+                # Tracking if checkpoints are made
+                checkpoint_dict["train_checkpoint_auto"] = overall_train_checkpoint
+                checkpoint_dict["valid_checkpoint_auto"] = overall_valid_checkpoint
+
+                script = get_script_name()
+                hostname = socket.gethostname()
+                logger.info("Host %s, script %s" % (hostname, script))
+                logger.info("Epoch %i complete" % e)
+                logger.info("Epoch mean train cost %f" % mean_epoch_train_cost)
+                logger.info("Epoch mean valid cost %f" % mean_epoch_valid_cost)
+                logger.info("Previous train costs %s" % overall_train_costs[-5:])
+                logger.info("Previous valid costs %s" % overall_valid_costs[-5:])
+
+                results_dict = {k: v for k, v in checkpoint_dict.items()
+                                if k not in ignore_keys}
+
+                # Checkpointing part
+                checkpoint_start = time.time()
+                if e < checkpoint_delay or skip_minimums:
+                    pass
+                elif mean_epoch_valid_cost < old_min_valid_cost:
+                    logger.info("Checkpointing valid...")
+                    # Using dumps so relationship between keys in the pickle
+                    # is preserved
+                    best_valid_checkpoint_pickle = pickle.dumps(checkpoint_dict)
+                    best_valid_checkpoint_epoch = e
+                    if mean_epoch_train_cost < old_min_train_cost:
+                        best_train_checkpoint_pickle = pickle.dumps(checkpoint_dict)
+                        best_train_checkpoint_epoch = e
+                    logger.info("Valid checkpointing complete.")
+                elif mean_epoch_train_cost < old_min_train_cost:
+                    logger.info("Checkpointing train...")
+                    best_train_checkpoint_pickle = pickle.dumps(checkpoint_dict)
+                    best_train_checkpoint_epoch = e
+                    logger.info("Train checkpointing complete.")
+
+                if e < checkpoint_delay:
+                    pass
+                    # Don't skip force checkpoints after default delay
+                    # Printing already happens above
+                elif((e % checkpoint_every_n_epochs) == 0) or (e == (n_epochs - 1)):
+                    logger.info("Checkpointing force...")
+                    checkpoint_save_path = "%s_model_checkpoint_%i.pkl" % (ident, e)
+                    weights_save_path = "%s_model_weights_%i.npz" % (ident, e)
+                    results_save_path = "%s_model_results_%i.html" % (ident, e)
+                    # Use pickle to preserve relationships between keys
+                    # while still copying buffers
+                    copy_pickle = pickle.dumps(checkpoint_dict)
+                    copy_dict = pickle.loads(copy_pickle)
+                    tcw.send((checkpoint_save_path, copy_dict))
+                    tww.send((weights_save_path, copy_dict))
+                    thw.send((results_save_path, results_dict))
+                    logger.info("Force checkpointing complete.")
+
+                checkpoint_stop = time.time()
+                joint_stop = time.time()
+
+                if skip_most_recents:
+                    pass
+                else:
+                    # Save latest
+                    results_save_path = "%s_most_recent_results.html" % ident
+                    thw.send((results_save_path, results_dict))
+
+                # Will show up next go around
+                checkpoint_time_delta = checkpoint_stop - checkpoint_start
+                checkpoint_time_total += checkpoint_time_delta
+                overall_checkpoint_deltas.append(checkpoint_time_delta)
+                overall_checkpoint_times.append(checkpoint_time_total)
+
+                joint_time_delta = joint_stop - joint_start
+                joint_time_total += joint_time_delta
+                overall_joint_deltas.append(joint_time_delta)
+                overall_joint_times.append(joint_time_total)
+    except KeyboardInterrupt:
+        logger.info("Training loop interrupted by user! Saving current best results.")
+
+    if not skip_minimums:
+        # Finalize saving best train and valid
+        best_valid_checkpoint_dict = pickle.loads(best_valid_checkpoint_pickle)
+        best_valid_results_dict = {k: v for k, v in best_valid_checkpoint_dict.items()
+                                   if k not in ignore_keys}
+        ee = best_valid_checkpoint_epoch
+        checkpoint_save_path = "%s_model_checkpoint_valid_%i.pkl" % (ident, ee)
+        weights_save_path = "%s_model_weights_valid_%i.npz" % (ident, ee)
+        results_save_path = "%s_model_results_valid_%i.html" % (ident, ee)
+        tcw.send((checkpoint_save_path, best_valid_checkpoint_dict))
+        tww.send((weights_save_path, best_valid_checkpoint_dict))
+        thw.send((results_save_path, best_valid_results_dict))
+
+        best_train_checkpoint_dict = pickle.loads(best_train_checkpoint_pickle)
+        best_train_results_dict = {k: v for k, v in best_train_checkpoint_dict.items()
+                                   if k not in ignore_keys}
+        ee = best_train_checkpoint_epoch
+        checkpoint_save_path = "%s_model_checkpoint_train_%i.pkl" % (ident, ee)
+        weights_save_path = "%s_model_weights_train_%i.npz" % (ident, ee)
+        results_save_path = "%s_model_results_train_%i.html" % (ident, ee)
+        tcw.send((checkpoint_save_path, best_train_checkpoint_dict))
+        tww.send((weights_save_path, best_train_checkpoint_dict))
+        thw.send((results_save_path, best_train_results_dict))
+    logger.info("Loop finished, closing write threads (this may take a while!)")
+    tcw.close()
+    tww.close()
+    thw.close()

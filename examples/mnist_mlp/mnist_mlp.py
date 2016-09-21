@@ -53,24 +53,35 @@ predict_function = theano.function([X_sym], [y_pred])
 checkpoint_dict = create_checkpoint_dict(locals())
 
 
-def error(*args):
-    x = args[0]
-    y = args[-1]
-    y_pred = predict_function(x)[0]
-    y_pred_inds = np.argmax(y_pred, axis=1).ravel()
-    y_inds = np.argmax(y, axis=1).ravel()
-    return [1 - np.mean((y_pred_inds == y_inds).astype("float32"))]
-
-
 train_itr = minibatch_iterator([X, y], minibatch_size, axis=0,
                                stop_index=60000)
 valid_itr = minibatch_iterator([X, y], minibatch_size, axis=0,
                                start_index=60000)
-TL = TrainingLoop(fit_function, error,
-                  train_itr, valid_itr,
-                  checkpoint_dict=checkpoint_dict,
-                  list_of_train_output_names=["train_cost"],
-                  valid_output_name="valid_error",
+
+
+def train_loop(function, itr):
+    X_mb, y_mb = next(itr)
+    return fit_function(X_mb, y_mb)
+
+
+def valid_loop(function, itr):
+    X_mb, y_mb = next(itr)
+    y_pred = predict_function(X_mb)[0]
+    y_pred_inds = np.argmax(y_pred, axis=1).ravel()
+    y_inds = np.argmax(y_mb, axis=1).ravel()
+    return [1 - np.mean((y_pred_inds == y_inds).astype("float32"))]
+
+
+checkpoint_every_n_epochs=1
+checkpoint_every_n_updates=100000
+checkpoint_every_n_seconds=60 * 60
+TL = TrainingLoop(train_loop, fit_function, train_itr,
+                  valid_loop, predict_function, valid_itr,
                   n_epochs=1000,
-                  optimizer_object=opt)
+                  checkpoint_delay=1,
+                  checkpoint_every_n_updates=checkpoint_every_n_updates,
+                  checkpoint_every_n_seconds=checkpoint_every_n_seconds,
+                  checkpoint_every_n_epochs=checkpoint_every_n_epochs,
+                  checkpoint_dict=checkpoint_dict,
+                  skip_minimums=False)
 epoch_results = TL.run()

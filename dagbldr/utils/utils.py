@@ -10,7 +10,7 @@ from ..core import safe_zip
 from ..core import get_type
 from ..core import get_file_matches
 from ..core import get_checkpoint_dir
-from ..core import unpickle
+from ..core import dunpickle
 from ..core import set_shared_variables_in_function
 from ..core import get_lib_shared_params
 
@@ -153,7 +153,7 @@ def create_or_continue_from_checkpoint_dict(lcls, append_name="best"):
     last_results_path = sorted_paths[-1]
     print("Loading in results from %s" % last_results_path)
 
-    checkpoint_dict["previous_results"] = unpickle(
+    checkpoint_dict["previous_results"] = dunpickle(
         last_results_path)
 
     for k, v in lcls.items():

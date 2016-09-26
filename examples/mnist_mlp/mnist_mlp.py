@@ -72,16 +72,9 @@ def valid_loop(function, itr):
     return [1 - np.mean((y_pred_inds == y_inds).astype("float32"))]
 
 
-checkpoint_every_n_epochs=1
-checkpoint_every_n_updates=100000
-checkpoint_every_n_seconds=60 * 60
 TL = TrainingLoop(train_loop, fit_function, train_itr,
                   valid_loop, predict_function, valid_itr,
                   n_epochs=1000,
-                  checkpoint_delay=1,
-                  checkpoint_every_n_updates=checkpoint_every_n_updates,
-                  checkpoint_every_n_seconds=checkpoint_every_n_seconds,
-                  checkpoint_every_n_epochs=checkpoint_every_n_epochs,
-                  checkpoint_dict=checkpoint_dict,
-                  skip_minimums=False)
+                  checkpoint_every_n_epochs=50,
+                  checkpoint_dict=checkpoint_dict)
 epoch_results = TL.run()

@@ -16,6 +16,7 @@ try:
     import cPickle as pickle
 except ImportError:
     import pickle
+import heapq
 import copy
 import threading
 import logging
@@ -61,6 +62,18 @@ def get_logger():
     Fetch the global dagbldr logger.
     """
     return logger
+
+
+FINALIZE_TRAINING = False
+
+
+def _get_finalize_train():
+    return FINALIZE_TRAINING
+
+
+def _set_finalize_train():
+    global FINALIZE_TRAINING
+    FINALIZE_TRAINING = True
 
 
 # Storage of internal shared
@@ -1233,19 +1246,98 @@ def threaded_checkpoint_writer(maxsize=25):
         messages.put((1, GeneratorExit))
 
 
+@coroutine
+def threaded_timed_writer(sleep_time=15 * 60):
+    """
+    Expects to be sent a tuple of
+    (objective,
+    ((results_save_path, results_dict),
+     (weights_save_path, checkpoint_dict),
+     (checkpoint_save_path, checkpoint_dict)))
+
+    Alternatively, pass None to bypass saving for that entry.
+
+    (objective,
+    ((results_save_path, results_dict),
+     None,
+     None))
+    """
+    messages = Queue.PriorityQueue()
+
+    def run_thread():
+        # always save the very first one
+        last_time = time.time() - (sleep_time + 1)
+        while True:
+            if messages.qsize() > 5:
+                mi = messages.queue.index(max(messages.queue))
+                del messages.queue[mi]
+                heapq.heapify(messages.queue)
+
+            time_flag = (time.time() - last_time) > sleep_time
+            # check if train loop has set FINALIZE_TRAINING
+            # if so, write out the best one and exit
+            train_flag = _get_finalize_train()
+            if time_flag or train_flag:
+                p, item = messages.get()
+                last_time = time.time()
+                if item is GeneratorExit:
+                    return
+                else:
+                    results_tup, weights_tup, checkpoint_tup = item
+                    if results_tup is not None:
+                        save_path, results_dict = results_tup
+                        save_results_as_html(save_path, results_dict)
+                    if weights_tup is not None:
+                        save_path, items_dict = weights_tup
+                        save_weights(save_path, items_dict)
+                    if checkpoint_tup is not None:
+                        save_path, pickle_item = checkpoint_tup
+                        save_checkpoint(save_path, pickle_item)
+                    # write the last one if training is done
+                    # but do not stop on a "results only" save
+                    artifact_flag = checkpoint_tup is not None or weights_tup is not None
+                    if train_flag and artifact_flag:
+                        logger.info("Last checkpoint written, exiting save thread")
+                        return
+
+    threading.Thread(target=run_thread).start()
+    try:
+        last_best = np.inf
+        n = -1
+        while True:
+            item = (yield)
+            if item[0] < last_best:
+                n = n - 1
+                last_best = item[0]
+                messages.put((n, item[1:]))
+            else:
+                messages.put((n + 1, item[1:]))
+    except GeneratorExit:
+        messages.put((1, GeneratorExit))
+
+
 class TrainingLoop(object):
     """
     Runs the loop - thin wrapper for serializing
 
-    Named in reference to https://www.reddit.com/r/MachineLearning/comments/4kd1qp/good_code_to_learn_from/d3e2irr
+    checkpoint_every_n_epochs - useful for reducing disk writes when there are many epochs
+    checkpoint_every_n_updates - useful for models where 1 epoch would have many updates
+    checkpoint_every_n_seconds - useful for models where 1 epoch takes a long time
+    write_every_n_seconds - the frequency at which the best checkpoint according to the train and valid objectives gets written
+
+    monitor frequency
+    skip_minimums - skip checkpoints based on minimum training/valid
+    skip_intermediates - skip within epoch checkpoints
+    skip_most_recents - skip writing most recent results html
     """
     def __init__(self, train_loop_function, train_function, train_itr,
                  valid_loop_function, valid_function, valid_itr,
                  n_epochs, checkpoint_dict,
-                 checkpoint_delay=10,
+                 checkpoint_delay=0,
                  checkpoint_every_n_epochs=1,
                  checkpoint_every_n_updates=np.inf,
                  checkpoint_every_n_seconds=np.inf,
+                 write_every_n_seconds=15 * 60,
                  monitor_frequency=1000,
                  skip_minimums=False,
                  skip_intermediates=True,
@@ -1266,6 +1358,7 @@ class TrainingLoop(object):
         self.checkpoint_every_n_epochs = checkpoint_every_n_epochs
         self.checkpoint_every_n_updates = checkpoint_every_n_updates
         self.checkpoint_every_n_seconds = checkpoint_every_n_seconds
+        self.write_every_n_seconds = write_every_n_seconds
         self.monitor_frequency = monitor_frequency
         self.skip_minimums = skip_minimums
         self.skip_intermediates = skip_intermediates
@@ -1309,6 +1402,7 @@ class TrainingLoop(object):
                  self.checkpoint_every_n_epochs,
                  self.checkpoint_every_n_updates,
                  self.checkpoint_every_n_seconds,
+                 self.write_every_n_seconds,
                  self.monitor_frequency,
                  self.skip_minimums,
                  self.skip_intermediates,
@@ -1322,7 +1416,8 @@ def run_loop(train_loop_function, train_function, train_itr,
              n_epochs, checkpoint_dict,
              checkpoint_delay=10, checkpoint_every_n_epochs=1,
              checkpoint_every_n_updates=np.inf,
-             checkpoint_every_n_seconds=np.inf,
+             checkpoint_every_n_seconds=10 * 60,
+             write_every_n_seconds=15 * 60,
              monitor_frequency=1000, skip_minimums=False,
              skip_intermediates=True, skip_most_recents=False,
              skip_n_train_minibatches=-1,
@@ -1417,9 +1512,10 @@ def run_loop(train_loop_function, train_function, train_itr,
     # save current state of lib and calling script
     archive_dagbldr()
 
-    tcw = threaded_checkpoint_writer()
-    tww = threaded_weights_writer()
-    thw = threaded_html_writer()
+    # Timed versus forced here
+    tcw = threaded_timed_writer(write_every_n_seconds)
+    vcw = threaded_timed_writer(write_every_n_seconds)
+    fcw = threaded_timed_writer(sleep_time=0)
 
     best_train_checkpoint_pickle = None
     best_train_checkpoint_epoch = 0
@@ -1433,10 +1529,11 @@ def run_loop(train_loop_function, train_function, train_itr,
     valid_costs = [0.] * 1000000
     try:
         for e in range(start_epoch, start_epoch + n_epochs):
+            e_i = e + 1
             joint_start = time.time()
             epoch_start = time.time()
             logger.info(" ")
-            logger.info("Starting training, epoch %i" % e)
+            logger.info("Starting training, epoch %i" % e_i)
             logger.info(" ")
             train_mb_count = 0
             valid_mb_count = 0
@@ -1467,8 +1564,7 @@ def run_loop(train_loop_function, train_function, train_itr,
                         # while still copying buffers
                         copy_pickle = pickle.dumps(checkpoint_dict)
                         copy_dict = pickle.loads(copy_pickle)
-                        tcw.send((checkpoint_save_path, copy_dict))
-                        tww.send((weights_save_path, copy_dict))
+
                         logger.info(" ")
                         logger.info("Update checkpoint after train mb %i" % train_mb_count)
                         logger.info("Current mean cost %f" % np.mean(partial_train_costs))
@@ -1479,7 +1575,13 @@ def run_loop(train_loop_function, train_function, train_itr,
                         # needs to be a list
                         running_train_mean = list(running_train_mean)
                         this_results_dict["this_epoch_train_mean_auto"] = running_train_mean
-                        thw.send((results_save_path, this_results_dict))
+
+                        objective = running_train_mean
+                        tcw.send((objective,
+                                  (results_save_path, this_results_dict),
+                                  (checkpoint_save_path, copy_dict),
+                                  (weights_save_path, copy_dict)))
+
                         if stateful_object is not None:
                             stateful_object.num_train_minibatches_run = train_mb_count
                             object_save_path = "%s_model_update_object_%i.pkl" % (ident, train_mb_count)
@@ -1494,8 +1596,7 @@ def run_loop(train_loop_function, train_function, train_itr,
                         # while still copying buffers
                         copy_pickle = pickle.dumps(checkpoint_dict)
                         copy_dict = pickle.loads(copy_pickle)
-                        tcw.send((checkpoint_save_path, copy_dict))
-                        tww.send((weights_save_path, copy_dict))
+
                         logger.info(" ")
                         logger.info("Time checkpoint after train mb %i" % train_mb_count)
                         logger.info("Current mean cost %f" % np.mean(partial_train_costs))
@@ -1506,7 +1607,13 @@ def run_loop(train_loop_function, train_function, train_itr,
                         # needs to be a list
                         running_train_mean = list(running_train_mean)
                         this_results_dict["this_epoch_train_mean_auto"] = running_train_mean
-                        thw.send((results_save_path, this_results_dict))
+
+                        objective = running_train_mean
+                        tcw.send((objective,
+                                  (results_save_path, this_results_dict),
+                                  (checkpoint_save_path, copy_dict),
+                                  (weights_save_path, copy_dict)))
+
                         if stateful_object is not None:
                             stateful_object.num_train_minibatches_run = train_mb_count
                             object_save_path = "%s_model_time_object_%i.pkl" % (ident, int(time_diff))
@@ -1519,7 +1626,12 @@ def run_loop(train_loop_function, train_function, train_itr,
                         logger.info(" ")
                         results_save_path = "%s_intermediate_results.html" % ident
                         this_results_dict["this_epoch_train_auto"] = train_costs[:train_mb_count]
-                        thw.send((results_save_path, this_results_dict))
+
+                        objective = np.mean(partial_train_costs)
+                        fcw.send((objective,
+                                  (results_save_path, this_results_dict),
+                                  None,
+                                  None))
             except StopIteration:
                 # Slice so that only valid data is in the minibatch
                 # this also assumes there is not a variable number
@@ -1527,7 +1639,7 @@ def run_loop(train_loop_function, train_function, train_itr,
                 train_stop = time.time()
                 train_costs = train_costs[:train_mb_count]
                 logger.info(" ")
-                logger.info("Starting validation, epoch %i" % e)
+                logger.info("Starting validation, epoch %i" % e_i)
                 logger.info(" ")
                 valid_start = time.time()
                 try:
@@ -1549,7 +1661,12 @@ def run_loop(train_loop_function, train_function, train_itr,
                             logger.info(" ")
                             results_save_path = "%s_intermediate_results.html" % ident
                             this_results_dict["this_epoch_valid_auto"] = valid_costs[:valid_mb_count]
-                            thw.send((results_save_path, this_results_dict))
+
+                            objective = np.mean(valid_costs)
+                            fcw.send((objective,
+                                     (results_save_path, this_results_dict),
+                                     None,
+                                     None))
                 except StopIteration:
                     pass
                 logger.info(" ")
@@ -1605,22 +1722,29 @@ def run_loop(train_loop_function, train_function, train_itr,
                 # Auto tracking times
                 checkpoint_dict["epoch_deltas_auto"] = overall_epoch_deltas
                 checkpoint_dict["epoch_times_auto"] = overall_epoch_times
+                checkpoint_dict["epoch_count_auto"] = list([i + 1 for i in range(len(overall_epoch_times))])
+
                 checkpoint_dict["train_deltas_auto"] = overall_train_deltas
                 checkpoint_dict["train_times_auto"] = overall_train_times
+
                 checkpoint_dict["valid_deltas_auto"] = overall_valid_deltas
                 checkpoint_dict["valid_times_auto"] = overall_valid_times
+
                 checkpoint_dict["checkpoint_deltas_auto"] = overall_checkpoint_deltas
                 checkpoint_dict["checkpoint_times_auto"] = overall_checkpoint_times
+
                 checkpoint_dict["joint_deltas_auto"] = overall_joint_deltas
                 checkpoint_dict["joint_times_auto"] = overall_joint_times
+
                 # Tracking if checkpoints are made
                 checkpoint_dict["train_checkpoint_auto"] = overall_train_checkpoint
                 checkpoint_dict["valid_checkpoint_auto"] = overall_valid_checkpoint
 
+
                 script = get_script_name()
                 hostname = socket.gethostname()
                 logger.info("Host %s, script %s" % (hostname, script))
-                logger.info("Epoch %i complete" % e)
+                logger.info("Epoch %i complete" % e_i)
                 logger.info("Epoch mean train cost %f" % mean_epoch_train_cost)
                 logger.info("Epoch mean valid cost %f" % mean_epoch_valid_cost)
                 logger.info("Previous train costs %s" % overall_train_costs[-5:])
@@ -1637,16 +1761,48 @@ def run_loop(train_loop_function, train_function, train_itr,
                     logger.info("Checkpointing valid...")
                     # Using dumps so relationship between keys in the pickle
                     # is preserved
+                    checkpoint_save_path = "%s_model_checkpoint_valid_%i.pkl" % (ident, e_i)
+                    weights_save_path = "%s_model_weights_valid_%i.npz" % (ident, e_i)
+                    results_save_path = "%s_model_results_valid_%i.html" % (ident, e_i)
                     best_valid_checkpoint_pickle = pickle.dumps(checkpoint_dict)
                     best_valid_checkpoint_epoch = e
+                    # preserve key relations
+                    copy_dict = pickle.loads(best_valid_checkpoint_pickle)
+
+                    objective = mean_epoch_valid_cost
+                    vcw.send((objective,
+                             (results_save_path, this_results_dict),
+                             (checkpoint_save_path, copy_dict),
+                             (weights_save_path, copy_dict)))
+
                     if mean_epoch_train_cost < old_min_train_cost:
+                        checkpoint_save_path = "%s_model_checkpoint_train_%i.pkl" % (ident, e_i)
+                        weights_save_path = "%s_model_weights_train_%i.npz" % (ident, e_i)
+                        results_save_path = "%s_model_results_train_%i.html" % (ident, e_i)
                         best_train_checkpoint_pickle = pickle.dumps(checkpoint_dict)
                         best_train_checkpoint_epoch = e
+
+                        objective = mean_epoch_train_cost
+                        vcw.send((objective,
+                                (results_save_path, this_results_dict),
+                                (checkpoint_save_path, copy_dict),
+                                (weights_save_path, copy_dict)))
                     logger.info("Valid checkpointing complete.")
                 elif mean_epoch_train_cost < old_min_train_cost:
                     logger.info("Checkpointing train...")
+                    checkpoint_save_path = "%s_model_checkpoint_train_%i.pkl" % (ident, e_i)
+                    weights_save_path = "%s_model_weights_train_%i.npz" % (ident, e_i)
+                    results_save_path = "%s_model_results_train_%i.html" % (ident, e_i)
                     best_train_checkpoint_pickle = pickle.dumps(checkpoint_dict)
                     best_train_checkpoint_epoch = e
+                    # preserve key relations
+                    copy_dict = pickle.loads(best_train_checkpoint_pickle)
+
+                    objective = mean_epoch_train_cost
+                    vcw.send((objective,
+                             (results_save_path, this_results_dict),
+                             (checkpoint_save_path, copy_dict),
+                             (weights_save_path, copy_dict)))
                     logger.info("Train checkpointing complete.")
 
                 if e < checkpoint_delay:
@@ -1655,16 +1811,19 @@ def run_loop(train_loop_function, train_function, train_itr,
                     # Printing already happens above
                 elif((e % checkpoint_every_n_epochs) == 0) or (e == (n_epochs - 1)):
                     logger.info("Checkpointing force...")
-                    checkpoint_save_path = "%s_model_checkpoint_%i.pkl" % (ident, e)
-                    weights_save_path = "%s_model_weights_%i.npz" % (ident, e)
-                    results_save_path = "%s_model_results_%i.html" % (ident, e)
+                    checkpoint_save_path = "%s_model_checkpoint_%i.pkl" % (ident, e_i)
+                    weights_save_path = "%s_model_weights_%i.npz" % (ident, e_i)
+                    results_save_path = "%s_model_results_%i.html" % (ident, e_i)
                     # Use pickle to preserve relationships between keys
                     # while still copying buffers
                     copy_pickle = pickle.dumps(checkpoint_dict)
                     copy_dict = pickle.loads(copy_pickle)
-                    tcw.send((checkpoint_save_path, copy_dict))
-                    tww.send((weights_save_path, copy_dict))
-                    thw.send((results_save_path, results_dict))
+
+                    objective = mean_epoch_train_cost
+                    fcw.send((objective,
+                             (results_save_path, results_dict),
+                             (weights_save_path, copy_dict),
+                             (checkpoint_save_path, copy_dict)))
                     logger.info("Force checkpointing complete.")
 
                 checkpoint_stop = time.time()
@@ -1675,7 +1834,11 @@ def run_loop(train_loop_function, train_function, train_itr,
                 else:
                     # Save latest
                     results_save_path = "%s_most_recent_results.html" % ident
-                    thw.send((results_save_path, results_dict))
+                    objective = mean_epoch_train_cost
+                    fcw.send((objective,
+                             (results_save_path, results_dict),
+                              None,
+                              None))
 
                 # Will show up next go around
                 checkpoint_time_delta = checkpoint_stop - checkpoint_start
@@ -1696,24 +1859,33 @@ def run_loop(train_loop_function, train_function, train_itr,
         best_valid_results_dict = {k: v for k, v in best_valid_checkpoint_dict.items()
                                    if k not in ignore_keys}
         ee = best_valid_checkpoint_epoch
-        checkpoint_save_path = "%s_model_checkpoint_valid_%i.pkl" % (ident, ee)
-        weights_save_path = "%s_model_weights_valid_%i.npz" % (ident, ee)
-        results_save_path = "%s_model_results_valid_%i.html" % (ident, ee)
-        tcw.send((checkpoint_save_path, best_valid_checkpoint_dict))
-        tww.send((weights_save_path, best_valid_checkpoint_dict))
-        thw.send((results_save_path, best_valid_results_dict))
+        checkpoint_save_path = "%s_model_checkpoint_valid_%i.pkl" % (ident, ee + 1)
+        weights_save_path = "%s_model_weights_valid_%i.npz" % (ident, ee + 1)
+        results_save_path = "%s_model_results_valid_%i.html" % (ident, ee + 1)
+
+        objective = -np.inf
+        fcw.send((objective,
+                 (results_save_path, best_valid_results_dict),
+                 (weights_save_path, best_valid_checkpoint_dict),
+                 (checkpoint_save_path, best_valid_checkpoint_dict)))
 
         best_train_checkpoint_dict = pickle.loads(best_train_checkpoint_pickle)
         best_train_results_dict = {k: v for k, v in best_train_checkpoint_dict.items()
                                    if k not in ignore_keys}
         ee = best_train_checkpoint_epoch
-        checkpoint_save_path = "%s_model_checkpoint_train_%i.pkl" % (ident, ee)
-        weights_save_path = "%s_model_weights_train_%i.npz" % (ident, ee)
-        results_save_path = "%s_model_results_train_%i.html" % (ident, ee)
-        tcw.send((checkpoint_save_path, best_train_checkpoint_dict))
-        tww.send((weights_save_path, best_train_checkpoint_dict))
-        thw.send((results_save_path, best_train_results_dict))
+        checkpoint_save_path = "%s_model_checkpoint_train_%i.pkl" % (ident, ee + 1)
+        weights_save_path = "%s_model_weights_train_%i.npz" % (ident, ee + 1)
+        results_save_path = "%s_model_results_train_%i.html" % (ident, ee + 1)
+
+        objective = -np.inf
+        fcw.send((objective,
+                 (results_save_path, best_train_results_dict),
+                 (weights_save_path, best_train_checkpoint_dict),
+                 (checkpoint_save_path, best_train_checkpoint_dict)))
+
     logger.info("Loop finished, closing write threads (this may take a while!)")
+    # set FINALIZE_TRAINING so that write threads know it is time to close
+    _set_finalize_train()
     tcw.close()
-    tww.close()
-    thw.close()
+    vcw.close()
+    fcw.close()

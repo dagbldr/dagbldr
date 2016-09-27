@@ -51,7 +51,7 @@ def as_shared(arr, **kwargs):
     return theano.shared(np.cast[_type](arr))
 
 
-def concatenate(tensor_list, name, axis=0):
+def concatenate(tensor_list, axis=0):
     """
     Wrapper to `theano.tensor.concatenate`, that casts everything to float32!
     """

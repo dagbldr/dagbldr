@@ -429,7 +429,7 @@ def masked_cost(cost, mask):
     return cost * mask
 
 
-def gaussian_kl(list_of_mu_inputs, list_of_sigma_inputs, name):
+def gaussian_kl(list_of_mu_inputs, list_of_sigma_inputs):
     """
     Kullback-Liebler divergence between a single multi-dimensional
     gaussian and an N(0, 1) prior.
@@ -450,14 +450,14 @@ def gaussian_kl(list_of_mu_inputs, list_of_sigma_inputs, name):
         Kullback-Liebler divergence
 
     """
-    conc_mu = concatenate(list_of_mu_inputs, name)
-    conc_sigma = concatenate(list_of_sigma_inputs, name)
+    conc_mu = concatenate(list_of_mu_inputs)
+    conc_sigma = concatenate(list_of_sigma_inputs)
     kl = 0.5 * tensor.sum(-2 * tensor.log(conc_sigma) + conc_mu ** 2
                           + conc_sigma ** 2 - 1, axis=-1)
     return kl
 
 
-def gaussian_log_kl(list_of_mu_inputs, list_of_log_sigma_inputs, name):
+def gaussian_log_kl(list_of_mu_inputs, list_of_log_sigma_inputs):
     """
     Kullback-Liebler divergence between a single multi-dimensional
     gaussian and an N(0, 1) prior.
@@ -478,8 +478,8 @@ def gaussian_log_kl(list_of_mu_inputs, list_of_log_sigma_inputs, name):
         Kullback-Liebler divergence
 
     """
-    conc_mu = concatenate(list_of_mu_inputs, name)
-    conc_log_sigma = 0.5 * concatenate(list_of_log_sigma_inputs, name)
+    conc_mu = concatenate(list_of_mu_inputs)
+    conc_log_sigma = 0.5 * concatenate(list_of_log_sigma_inputs)
     kl = 0.5 * tensor.sum(-2 * conc_log_sigma + conc_mu ** 2
                           + tensor.exp(2 * conc_log_sigma) - 1, axis=-1)
     return kl

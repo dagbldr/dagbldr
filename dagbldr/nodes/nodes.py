@@ -537,7 +537,7 @@ def dropout(list_of_inputs, graph, name, on_off_switch, dropout_prob=0.5,
     if theano_seed == 0:
         print("WARNING: prior layer got 0 seed. Reseeding...")
         theano_seed = random_state.randint(-2**32, 2**32)
-    conc_input = concatenate(list_of_inputs, name,
+    conc_input = concatenate(list_of_inputs,
                              axis=list_of_inputs[0].ndim - 1)
     dropped = _dropout(conc_input, random_state, on_off_switch, p=dropout_prob)
     return dropped
@@ -547,7 +547,7 @@ def fixed_projection(list_of_inputs, list_of_input_dims, transform,
                      name=None, pre=None, post=None, strict=True):
     assert len(list_of_input_dims) == len(list_of_inputs)
     conc_input_dim = sum(list_of_input_dims)
-    conc_input = concatenate(list_of_inputs, name,
+    conc_input = concatenate(list_of_inputs,
                              axis=list_of_inputs[0].ndim - 1)
     """
     W_name = name + '_W'
@@ -658,7 +658,7 @@ def projection(list_of_inputs, list_of_input_dims, proj_dim, name=None,
         b = as_shared(np_b)
         set_shared(b_name, b)
 
-    conc_input = concatenate(list_of_inputs, name,
+    conc_input = concatenate(list_of_inputs,
                              axis=list_of_inputs[0].ndim - 1)
     output = tensor.dot(conc_input, W) + b
 
@@ -953,7 +953,7 @@ def conv2d(list_of_inputs, list_of_input_dims, num_feature_maps,
         raise ValueError("BN not yet implemented")
 
     assert len(list_of_input_dims) == len(list_of_inputs)
-    conc_input = concatenate(list_of_inputs, name, axis=1)
+    conc_input = concatenate(list_of_inputs, axis=1)
     # assumes bc01 format
     input_channels = sum([inp[0] for inp in list_of_input_dims])
     input_width = sum([inp[1] for inp in list_of_input_dims])
@@ -998,7 +998,7 @@ def pool2d(list_of_inputs, pool_size=(2, 2), pool_func="max", name=None):
         name = get_name()
     else:
         name = name + "_pool2d"
-    conc_input = concatenate(list_of_inputs, name, axis=1)
+    conc_input = concatenate(list_of_inputs, axis=1)
     if pool_func == "max":
         act_func = max_pool_2d
     else:

@@ -59,12 +59,12 @@ valid_itr = minibatch_iterator([X, y], minibatch_size, axis=0,
                                start_index=60000)
 
 
-def train_loop(function, itr):
+def train_loop(itr):
     X_mb, y_mb = next(itr)
     return fit_function(X_mb, y_mb)
 
 
-def valid_loop(function, itr):
+def valid_loop(itr):
     X_mb, y_mb = next(itr)
     y_pred = predict_function(X_mb)[0]
     y_pred_inds = np.argmax(y_pred, axis=1).ravel()
@@ -72,8 +72,8 @@ def valid_loop(function, itr):
     return [1 - np.mean((y_pred_inds == y_inds).astype("float32"))]
 
 
-TL = TrainingLoop(train_loop, fit_function, train_itr,
-                  valid_loop, predict_function, valid_itr,
+TL = TrainingLoop(train_loop, train_itr,
+                  valid_loop, valid_itr,
                   n_epochs=1000,
                   checkpoint_every_n_epochs=50,
                   checkpoint_dict=checkpoint_dict)

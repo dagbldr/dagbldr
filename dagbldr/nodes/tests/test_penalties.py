@@ -61,10 +61,10 @@ def test_masked_cost():
 
 def test_gaussian_kl():
     fake_sigma = (.5 * X_sym + .001) ** 2
-    kl = gaussian_kl([X_sym, X_sym], [fake_sigma, fake_sigma], 'gaussian_kl')
+    kl = gaussian_kl([X_sym, X_sym], [fake_sigma, fake_sigma])
     theano.function([X_sym], [kl], mode="FAST_COMPILE")
 
 
 def test_gaussian_log_kl():
-    kl = gaussian_log_kl([X_sym, X_sym], [X_sym, X_sym], 'gaussian_log_kl')
+    kl = gaussian_log_kl([X_sym, X_sym], [X_sym, X_sym])
     theano.function([X_sym], [kl], mode="FAST_COMPILE")

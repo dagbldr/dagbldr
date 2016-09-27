@@ -70,15 +70,23 @@ class minibatch_iterator(base_iterator):
     def _slice_without_masks(self, ind):
         try:
             if self.axis == 0:
-                return [c[ind] for c in self.list_of_containers]
+                if len(self.list_of_containers) > 1:
+                    return [c[ind] for c in self.list_of_containers]
+                else:
+                    return self.list_of_containers[0][ind]
+
             elif self.axis == 1:
-                return [c[:, ind] for c in self.list_of_containers]
+                if len(self.list_of_containers) > 1:
+                    return [c[:, ind] for c in self.list_of_containers]
+                else:
+                    return self.list_of_containers[0][:, ind]
         except IndexError:
             self.reset()
             raise StopIteration("End of iteration")
 
     def _slice_with_masks(self, ind):
         try:
+            raise ValueError("Not yet implemented")
             cs = self._slice_without_masks(ind)
             if self.axis == 0:
                 ms = [np.ones_like(c[:, 0]) for c in cs]

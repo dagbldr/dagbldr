@@ -44,6 +44,7 @@ from collections import defaultdict
 from functools import reduce
 from ..externals import dill
 
+sys.setrecursionlimit(40000)
 
 logging.basicConfig(level=logging.INFO,
                     format='%(message)s')
@@ -1330,8 +1331,8 @@ class TrainingLoop(object):
     skip_intermediates - skip within epoch checkpoints
     skip_most_recents - skip writing most recent results html
     """
-    def __init__(self, train_loop_function, train_function, train_itr,
-                 valid_loop_function, valid_function, valid_itr,
+    def __init__(self, train_loop_function, train_itr,
+                 valid_loop_function, valid_itr,
                  n_epochs, checkpoint_dict,
                  checkpoint_delay=0,
                  checkpoint_every_n_epochs=1,
@@ -1343,11 +1344,9 @@ class TrainingLoop(object):
                  skip_intermediates=True,
                  skip_most_recents=False):
         self.train_loop_function = train_loop_function
-        self.train_function = train_function
         self.train_itr = train_itr
 
         self.valid_loop_function = valid_loop_function
-        self.valid_function = valid_function
         self.valid_itr = valid_itr
 
         self.n_epochs = n_epochs
@@ -1369,33 +1368,29 @@ class TrainingLoop(object):
 
     def __getstate__(self):
         skiplist = [self.train_loop_function,
-                    self.train_function,
                     self.train_itr,
                     self.valid_loop_function,
-                    self.valid_function,
                     self.valid_itr,
                     self.n_epochs,
                     self.checkpoint_dict]
         return {k:v for k, v in self.__dict__.items() if v not in skiplist}
 
-    def refresh(self, train_loop_function, train_function, train_itr,
-                valid_loop_function, valid_function, valid_itr,
+    def refresh(self, train_loop_function, train_itr,
+                valid_loop_function, valid_itr,
                 n_epochs,
                 checkpoint_dict):
         # Must refresh after reloading from pkl
         self.train_loop_function = train_loop_function
-        self.train_function = train_function
         self.train_itr = train_itr
 
         self.valid_loop_function = valid_loop_function
-        self.valid_function = valid_function
         self.valid_itr = valid_itr
         self.n_epochs = n_epochs
         self.checkpoint_dict = checkpoint_dict
 
     def run(self):
-        run_loop(self.train_loop_function, self.train_function, self.train_itr,
-                 self.valid_loop_function, self.valid_function, self.valid_itr,
+        run_loop(self.train_loop_function, self.train_itr,
+                 self.valid_loop_function, self.valid_itr,
                  self.n_epochs,
                  self.checkpoint_dict,
                  self.checkpoint_delay,
@@ -1411,8 +1406,8 @@ class TrainingLoop(object):
                  self)
 
 
-def run_loop(train_loop_function, train_function, train_itr,
-             valid_loop_function, valid_function, valid_itr,
+def run_loop(train_loop_function, train_itr,
+             valid_loop_function, valid_itr,
              n_epochs, checkpoint_dict,
              checkpoint_delay=10, checkpoint_every_n_epochs=1,
              checkpoint_every_n_updates=np.inf,
@@ -1429,7 +1424,6 @@ def run_loop(train_loop_function, train_function, train_itr,
     stateful_object allows to serialize and relaunch in middle of an epoch
     for long training models
     """
-    logger.info("Running loop...")
     # Assume keys which are theano functions to ignore!
     ignore_keys = [k for k, v in checkpoint_dict.items()
                    if isinstance(v, theano.compile.function_module.Function)]
@@ -1512,6 +1506,15 @@ def run_loop(train_loop_function, train_function, train_itr,
     # save current state of lib and calling script
     archive_dagbldr()
 
+    logger.info("Model parameter summary")
+    logger.info("-----------------------")
+    total = 0
+    for k, v in get_params().items():
+        shp = v.get_value().shape
+        logger.info("%s: %s" % (k, shp))
+        total += np.prod(shp)
+    logger.info("Total parameter count %f M" % (total / 1E6))
+
     # Timed versus forced here
     tcw = threaded_timed_writer(write_every_n_seconds)
     vcw = threaded_timed_writer(write_every_n_seconds)
@@ -1529,12 +1532,11 @@ def run_loop(train_loop_function, train_function, train_itr,
     valid_costs = [0.] * 1000000
     try:
         for e in range(start_epoch, start_epoch + n_epochs):
+            logger.info(" ")
             e_i = e + 1
             joint_start = time.time()
             epoch_start = time.time()
-            logger.info(" ")
             logger.info("Starting training, epoch %i" % e_i)
-            logger.info(" ")
             train_mb_count = 0
             valid_mb_count = 0
             results_dict = {k: v for k, v in checkpoint_dict.items()
@@ -1548,7 +1550,7 @@ def run_loop(train_loop_function, train_function, train_itr,
                     if train_mb_count < skip_n_train_minibatches:
                         train_mb_count += 1
                         continue
-                    partial_train_costs = train_loop(train_function, train_itr)
+                    partial_train_costs = train_loop(train_itr)
                     train_costs[train_mb_count] = np.mean(partial_train_costs)
                     tc = train_costs[train_mb_count]
                     if np.isnan(tc):
@@ -1565,10 +1567,8 @@ def run_loop(train_loop_function, train_function, train_itr,
                         copy_pickle = pickle.dumps(checkpoint_dict)
                         copy_dict = pickle.loads(copy_pickle)
 
-                        logger.info(" ")
                         logger.info("Update checkpoint after train mb %i" % train_mb_count)
                         logger.info("Current mean cost %f" % np.mean(partial_train_costs))
-                        logger.info(" ")
                         this_results_dict["this_epoch_train_auto"] = train_costs[:train_mb_count]
                         tmb = train_costs[:train_mb_count]
                         running_train_mean = np.cumsum(tmb) / (np.arange(train_mb_count) + 1)
@@ -1597,10 +1597,8 @@ def run_loop(train_loop_function, train_function, train_itr,
                         copy_pickle = pickle.dumps(checkpoint_dict)
                         copy_dict = pickle.loads(copy_pickle)
 
-                        logger.info(" ")
                         logger.info("Time checkpoint after train mb %i" % train_mb_count)
                         logger.info("Current mean cost %f" % np.mean(partial_train_costs))
-                        logger.info(" ")
                         this_results_dict["this_epoch_train_auto"] = train_costs[:train_mb_count]
                         tmb = train_costs[:train_mb_count]
                         running_train_mean = np.cumsum(tmb) / (np.arange(train_mb_count) + 1)
@@ -1620,10 +1618,8 @@ def run_loop(train_loop_function, train_function, train_itr,
                             save_checkpoint(object_save_path, stateful_object)
                     draw = random_state.rand()
                     if draw < monitor_prob and not skip_intermediates:
-                        logger.info(" ")
                         logger.info("Starting train mb %i" % train_mb_count)
                         logger.info("Current mean cost %f" % np.mean(partial_train_costs))
-                        logger.info(" ")
                         results_save_path = "%s_intermediate_results.html" % ident
                         this_results_dict["this_epoch_train_auto"] = train_costs[:train_mb_count]
 
@@ -1638,14 +1634,12 @@ def run_loop(train_loop_function, train_function, train_itr,
                 # of minibatches in an epoch!
                 train_stop = time.time()
                 train_costs = train_costs[:train_mb_count]
-                logger.info(" ")
                 logger.info("Starting validation, epoch %i" % e_i)
-                logger.info(" ")
                 valid_start = time.time()
                 try:
                     # Valid loop
                     while True:
-                        partial_valid_costs = valid_loop(valid_function, valid_itr)
+                        partial_valid_costs = valid_loop(valid_itr)
                         valid_costs[valid_mb_count] = np.mean(partial_valid_costs)
                         vc = valid_costs[valid_mb_count]
                         if np.isnan(vc):
@@ -1654,11 +1648,9 @@ def run_loop(train_loop_function, train_function, train_itr,
                         valid_mb_count += 1
                         draw = random_state.rand()
                         if draw < monitor_prob and not skip_intermediates:
-                            logger.info(" ")
                             logger.info("Valid mb %i" % valid_mb_count)
                             logger.info("Current validation mean cost %f" % np.mean(
                                 valid_costs))
-                            logger.info(" ")
                             results_save_path = "%s_intermediate_results.html" % ident
                             this_results_dict["this_epoch_valid_auto"] = valid_costs[:valid_mb_count]
 
@@ -1669,7 +1661,6 @@ def run_loop(train_loop_function, train_function, train_itr,
                                      None))
                 except StopIteration:
                     pass
-                logger.info(" ")
                 valid_stop = time.time()
                 epoch_stop = time.time()
                 valid_costs = valid_costs[:valid_mb_count]

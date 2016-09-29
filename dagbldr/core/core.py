@@ -85,9 +85,20 @@ def get_lib_shared_params():
     return _lib_shared_params
 
 
+# universal time
+tt = str(time.time()).split(".")[0]
+def get_time_string():
+    return tt
+
+
 def get_name():
     base = str(uuid.uuid4())
     return base
+
+
+def get_script():
+    script_name = main.__file__.split(os.path.sep)[-1].split(".")[0]
+    return script_name
 
 
 def get_shared(name):
@@ -197,17 +208,21 @@ def convert_to_one_hot(itr, n_classes, dtype="int32"):
         one_hot[np.arange(len(itr)), itr] = 1
     return one_hot
 
-
+# decided at import, should be consistent over training
+checkpoint_uuid = get_name()[:6]
 def get_checkpoint_dir(checkpoint_dir=None, folder=None, create_dir=True):
     """ Get checkpoint directory path """
-    if not checkpoint_dir:
+    if checkpoint_dir is None:
         checkpoint_dir = os.getenv("DAGBLDR_MODELS", os.path.join(
             os.path.expanduser("~"), "dagbldr_models"))
+
     if folder is None:
-        checkpoint_name = main.__file__.split(".")[0]
-        checkpoint_dir = os.path.join(checkpoint_dir, checkpoint_name)
+        checkpoint_name = get_script()
+        tmp = checkpoint_dir + os.path.sep + checkpoint_name + "_" + checkpoint_uuid
+        checkpoint_dir = tmp
     else:
         checkpoint_dir = os.path.join(checkpoint_dir, folder)
+
     if not os.path.exists(checkpoint_dir) and create_dir:
         os.makedirs(checkpoint_dir)
     return checkpoint_dir
@@ -504,7 +519,7 @@ def zip_dir(src, dst):
 
 def archive_dagbldr():
     checkpoint_dir = get_checkpoint_dir()
-    code_snapshot_dir = os.path.join(checkpoint_dir, "code_snapshot")
+    code_snapshot_dir = checkpoint_dir + os.path.sep + "code_snapshot"
     if not os.path.exists(code_snapshot_dir):
         os.mkdir(code_snapshot_dir)
     try:
@@ -513,20 +528,28 @@ def archive_dagbldr():
         command_string += " ".join(sys.argv)
     except KeyError:
         command_string = "python " + " ".join(sys.argv)
-    command_script_path = os.path.join(code_snapshot_dir, "run.sh")
+    command_script_path = code_snapshot_dir + os.path.sep + "run.sh"
     if not os.path.exists(command_script_path):
         with open(command_script_path, 'w') as f:
             f.writelines(command_string)
-    save_script_path = os.path.join(code_snapshot_dir, main.__file__)
-    training_utils_dir = inspect.getfile(inspect.currentframe())
-    lib_dir = str(os.sep).join(training_utils_dir.split(os.sep)[:-2])
-    save_lib_path = os.path.join(code_snapshot_dir, "dagbldr_archive.zip")
+
+    save_script_path = code_snapshot_dir + os.path.sep + get_script()
+    lib_dir = str(os.sep).join(save_script_path.split(os.sep)[:-2])
+    save_lib_path = code_snapshot_dir + os.path.sep + "dagbldr_archive.zip"
+
     existing_reports = glob.glob(os.path.join(checkpoint_dir, "*.html"))
     existing_models = glob.glob(os.path.join(checkpoint_dir, "*.pkl"))
     empty = all([len(l) == 0 for l in (existing_reports, existing_models)])
     if not os.path.exists(save_script_path) or empty:
         logger.info("Saving code archive %s at %s" % (lib_dir, save_lib_path))
-        script_location = os.path.abspath(sys.argv[0])
+        script_name = main.__file__.split(os.path.sep)[-1]
+        p = None
+        for argv in sys.argv[::-1]:
+            if script_name in argv:
+                p = argv
+        if p is None:
+            raise ValueError("No script found?")
+        script_location = os.path.abspath(p)
         shutil.copy2(script_location, save_script_path)
         zip_dir(lib_dir, save_lib_path)
 
@@ -963,6 +986,7 @@ def make_gif(arr, gif_name, plot_width, plot_height, resize_scale_width=5,
 
 def get_resource_dir(name, resource_dir=None, folder=None, create_dir=True):
     """ Get dataset directory path """
+    # Only used for JS downloader
     if not resource_dir:
         resource_dir = os.getenv("DAGBLDR_MODELS", os.path.join(
             os.path.expanduser("~"), "dagbldr_models"))
@@ -983,6 +1007,7 @@ def get_script_name():
     return script_name
 
 
+"""
 def archive(tag=None):
     script_name = get_script_name()[:-3]
     save_path = get_resource_dir(script_name)
@@ -1002,6 +1027,7 @@ def archive(tag=None):
     else:
         save_lib_path = os.path.join(save_path, tag + "_" + lib_name)
     shutil.copy2(lib_location, save_lib_path)
+"""
 
 
 def coroutine(func):
@@ -1026,7 +1052,7 @@ def save_weights(save_path, items_dict, use_resource_dir=True):
     if use_resource_dir:
         # Assume it ends with .py ...
         script_name = get_script_name()[:-3]
-        save_path = os.path.join(get_resource_dir(script_name), save_path)
+        save_path = os.path.join(get_checkpoint_dir(), save_path)
     logger.info("Saving weights to %s" % save_weights_path)
     if len(weights_dict.keys()) > 0:
         np.savez(save_path, **weights_dict)
@@ -1153,7 +1179,7 @@ def save_results_as_html(save_path, results_dict, use_resource_dir=True,
     if use_resource_dir:
         # Assume it ends with .py ...
         script_name = get_script_name()[:-3]
-        save_path = os.path.join(get_resource_dir(script_name), save_path)
+        save_path = os.path.join(get_checkpoint_dir(), save_path)
     logger.info("Saving HTML results %s" % save_path)
     with open(save_path, "w") as f:
         f.writelines(as_html)
@@ -1213,8 +1239,7 @@ def threaded_weights_writer(maxsize=25):
 def save_checkpoint(save_path, pickle_item, use_resource_dir=True):
     if use_resource_dir:
         # Assume it ends with .py ...
-        script_name = get_script_name()[:-3]
-        save_path = os.path.join(get_resource_dir(script_name), save_path)
+        save_path = os.path.join(get_checkpoint_dir(), save_path)
     sys.setrecursionlimit(40000)
     logger.info("Saving checkpoint to %s" % save_path)
     with open(save_path, mode="wb") as f:

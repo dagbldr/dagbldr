@@ -6,6 +6,10 @@ from theano import tensor
 from ..utils import as_shared
 
 
+def c(x):
+    return np.cast["float32"](x)
+
+
 def gradient_clipping(grads, rescale=5.):
     grad_norm = tensor.sqrt(sum(map(lambda x: tensor.sqr(x).sum(), grads)))
     scaling_num = rescale
@@ -46,7 +50,7 @@ class sgd_momentum(object):
         for n, (param, grad) in enumerate(zip(params, grads)):
             memory = self.memory_[n]
             updates.append((param, param - learning_rate * grad))
-            updates.append((memory, momentum * memory + (1. - momentum) * grad))
+            updates.append((memory, momentum * memory + (c(1.) - momentum) * grad))
         return updates
 
 
@@ -74,7 +78,7 @@ class sgd_nesterov(object):
             memory = self.memory_[n]
             update = momentum * memory - learning_rate * grad
             update2 = momentum * momentum * memory - (
-                1 + momentum) * learning_rate * grad
+                c(1) + momentum) * learning_rate * grad
             updates.append((memory, update))
             updates.append((param, param + update2))
         return updates
@@ -105,8 +109,8 @@ class rmsprop(object):
         scaling = scaling_num / scaling_den
         # constants, from AG "Generating Sequences with Recurrent Neural
         # Networks"
-        decay = 0.95
-        minimum_grad = 1E-4
+        decay = c(0.95)
+        minimum_grad = c(1E-4)
         updates = []
         for n, (param, grad) in enumerate(zip(params, grads)):
             grad *= scaling
@@ -161,9 +165,9 @@ class adadelta(object):
     """
     def __init__(self, params, running_grad_decay=0.95, running_up_decay=0.95,
                  eps=1E-6):
-        self.running_grad_decay = running_grad_decay
-        self.running_up_decay = running_up_decay
-        self.eps = eps
+        self.running_grad_decay = c(running_grad_decay)
+        self.running_up_decay = c(running_up_decay)
+        self.eps = c(eps)
         self.running_up2_ = [theano.shared(np.zeros_like(p.get_value()))
                              for p in params]
         self.running_grads2_ = [theano.shared(np.zeros_like(p.get_value()))
@@ -181,11 +185,11 @@ class adadelta(object):
             running_up2 = self.running_up2_[n]
             previous_grad = self.previous_grads_[n]
             rg2up = running_grad_decay * running_grad2 + (
-                1. - running_grad_decay) * (grad ** 2)
+                c(1.) - running_grad_decay) * (grad ** 2)
             updir = -tensor.sqrt(running_up2 + eps) / tensor.sqrt(
                 running_grad2 + eps) * previous_grad
             ru2up = running_up_decay * running_up2 + (
-                1. - running_up_decay) * (updir ** 2)
+                c(1.) - running_up_decay) * (updir ** 2)
             updates.append((previous_grad, grad))
             updates.append((running_grad2, rg2up))
             updates.append((running_up2, ru2up))
@@ -201,14 +205,14 @@ class adam(object):
     """
     def __init__(self, params, learning_rate, b1=0.1, b2=0.001, eps=1E-8):
         self.learning_rate = as_shared(learning_rate)
-        self.b1 = b1
-        self.b2 = b2
-        self.eps = eps
+        self.b1 = c(b1)
+        self.b2 = c(b2)
+        self.eps = c(eps)
         self.memory_ = [theano.shared(np.zeros_like(p.get_value()))
                         for p in params]
         self.velocity_ = [theano.shared(np.zeros_like(p.get_value()))
                           for p in params]
-        self.itr_ = theano.shared(np.array(0.).astype(theano.config.floatX))
+        self.itr_ = theano.shared(np.array(c(0.)))
 
     def updates(self, params, grads):
         learning_rate = self.learning_rate
@@ -218,14 +222,14 @@ class adam(object):
         updates = []
         itr = self.itr_
         i_t = itr + 1.
-        fix1 = 1. - (1. - b1) ** i_t
-        fix2 = 1. - (1. - b2) ** i_t
+        fix1 = c(1.) - (c(1.) - b1) ** i_t
+        fix2 = c(1.) - (c(1.) - b2) ** i_t
         lr_t = learning_rate * (tensor.sqrt(fix2) / fix1)
         for n, (param, grad) in enumerate(zip(params, grads)):
             memory = self.memory_[n]
             velocity = self.velocity_[n]
-            m_t = (b1 * grad) + ((1. - b1) * memory)
-            v_t = (b2 * tensor.sqr(grad)) + ((1. - b2) * velocity)
+            m_t = (b1 * grad) + ((c(1.) - b1) * memory)
+            v_t = (b2 * tensor.sqr(grad)) + ((c(1.) - b2) * velocity)
             g_t = m_t / (tensor.sqrt(v_t) + eps)
             p_t = param - (lr_t * g_t)
             updates.append((memory, m_t))

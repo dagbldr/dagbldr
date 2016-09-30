@@ -97,7 +97,12 @@ def get_name():
 
 
 def get_script():
-    script_name = main.__file__.split(os.path.sep)[-1].split(".")[0]
+    script_path = main.__file__
+    script_name = script_path.split(os.path.sep)[-1].split(".")[0]
+    # gotta play games for slurm runner
+    if "slurm" in script_name:
+        script_name = os.environ['SLURM_JOB_NAME']
+        script_name = script_name.split(".")[0]
     return script_name
 
 
@@ -207,6 +212,7 @@ def convert_to_one_hot(itr, n_classes, dtype="int32"):
         one_hot = np.zeros((len(itr), n_classes), dtype=dtype)
         one_hot[np.arange(len(itr)), itr] = 1
     return one_hot
+
 
 # decided at import, should be consistent over training
 checkpoint_uuid = get_name()[:6]
@@ -1000,13 +1006,6 @@ def get_resource_dir(name, resource_dir=None, folder=None, create_dir=True):
     return resource_dir
 
 
-def get_script_name():
-    script_path = os.path.abspath(sys.argv[0])
-    # Assume it ends with .py ...
-    script_name = script_path.split(os.sep)[-1]
-    return script_name
-
-
 """
 def archive(tag=None):
     script_name = get_script_name()[:-3]
@@ -1177,8 +1176,6 @@ def save_results_as_html(save_path, results_dict, use_resource_dir=True,
     as_html = filled_js_template_from_results_dict(
         results_dict, default_show=show_keys)
     if use_resource_dir:
-        # Assume it ends with .py ...
-        script_name = get_script_name()[:-3]
         save_path = os.path.join(get_checkpoint_dir(), save_path)
     logger.info("Saving HTML results %s" % save_path)
     with open(save_path, "w") as f:
@@ -1543,7 +1540,13 @@ def run_loop(train_loop_function, train_itr,
     # Timed versus forced here
     tcw = threaded_timed_writer(write_every_n_seconds)
     vcw = threaded_timed_writer(write_every_n_seconds)
-    fcw = threaded_timed_writer(sleep_time=0)
+    ip_addr = socket.gethostbyname(socket.gethostname())
+    subnet = ".".join(ip_addr.split(".")[:-1])
+    if subnet == "132.204.25":
+        logger.info("Found special subnet, using slow write mode")
+        fcw = threaded_timed_writer(sleep_time=write_every_n_seconds)
+    else:
+        fcw = threaded_timed_writer(sleep_time=0)
 
     best_train_checkpoint_pickle = None
     best_train_checkpoint_epoch = 0
@@ -1757,7 +1760,7 @@ def run_loop(train_loop_function, train_itr,
                 checkpoint_dict["valid_checkpoint_auto"] = overall_valid_checkpoint
 
 
-                script = get_script_name()
+                script = get_script()
                 hostname = socket.gethostname()
                 logger.info("Host %s, script %s" % (hostname, script))
                 logger.info("Epoch %i complete" % e_i)

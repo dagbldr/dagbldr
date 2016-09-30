@@ -38,8 +38,12 @@ def test_gaussian_sample():
     sample_function = theano.function([X_sym], [r1, r2, r3],
                                       mode="FAST_COMPILE")
     s_r1, s_r2, s_r3 = sample_function(X[:100])
+
     assert_almost_equal(s_r1, s_r2)
     assert_raises(AssertionError, assert_almost_equal, s_r1, s_r3)
+
+    ss_r1, ss_r2, ss_r3 = sample_function(X[:100])
+    assert_raises(AssertionError, assert_almost_equal, s_r1, ss_r1)
 
 
 def test_gaussian_log_sample():
@@ -61,5 +65,9 @@ def test_gaussian_log_sample():
     sample_function = theano.function([X_sym], [r1, r2, r3],
                                       mode="FAST_COMPILE")
     s_r1, s_r2, s_r3 = sample_function(X[:100])
+
     assert_almost_equal(s_r1, s_r2)
     assert_raises(AssertionError, assert_almost_equal, s_r1, s_r3)
+
+    ss_r1, ss_r2, ss_r3 = sample_function(X[:100])
+    assert_raises(AssertionError, assert_almost_equal, s_r1, ss_r1)

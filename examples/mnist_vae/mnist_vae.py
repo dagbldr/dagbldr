@@ -77,7 +77,8 @@ checkpoint_dict = create_checkpoint_dict(locals())
 train_itr = minibatch_iterator([X], minibatch_size,
                                stop_index=60000, axis=0)
 valid_itr = minibatch_iterator([X], minibatch_size,
-                               start_index=60000, axis=0)
+                               start_index=60000, stop_index=70000,
+                               axis=0)
 
 
 def train_loop(itr):
@@ -92,7 +93,7 @@ def valid_loop(itr):
 
 TL = TrainingLoop(train_loop, train_itr,
                   valid_loop, valid_itr,
-                  n_epochs=2000,
+                  n_epochs=5000,
                   checkpoint_every_n_epochs=50,
                   checkpoint_dict=checkpoint_dict)
 epoch_results = TL.run()

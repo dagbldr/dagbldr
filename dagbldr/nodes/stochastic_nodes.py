@@ -1,6 +1,7 @@
 # Author: Kyle Kastner
 # License: BSD 3-clause
 from theano.sandbox.rng_mrg import MRG_RandomStreams
+from theano import tensor
 from ..utils import concatenate
 from ..core import get_logger, get_type
 
@@ -96,5 +97,5 @@ def gaussian_log_sample(list_of_mu_inputs, list_of_log_sigma_inputs,
     e = theano_rng.normal(size=(conc_log_sigma.shape[0],
                                 conc_log_sigma.shape[1]),
                           dtype=conc_log_sigma.dtype)
-    samp = conc_mu + conc_log_sigma * e
+    samp = conc_mu + tensor.exp(conc_log_sigma) * e
     return samp

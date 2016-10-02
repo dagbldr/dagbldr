@@ -3,4 +3,5 @@ __version__ = '.'.join(__version_info__)
 
 from .nodes import *
 from .stochastic_nodes import *
+from .recurrent_nodes import *
 from .penalties import *

@@ -28,11 +28,14 @@ def simple_fork(list_of_inputs, list_of_input_dims, proj_dim, name=None,
     return ret
 
 
-def simple(step_input, previous_hidden, hidden_dim, name=None,
-           random_state=None, strict=True, init_func=np_ortho):
+def simple(step_input, previous_hidden, hidden_dim, mask=None,
+           name=None, random_state=None, strict=True, init_func=np_ortho):
     if name is None:
         name = get_name()
     W_name = name + "_simple_recurrent_W"
+
+    if mask is not None:
+        raise ValueError("Ragged minibatch processing not yet implemented")
 
     try:
         W = get_shared(W_name)

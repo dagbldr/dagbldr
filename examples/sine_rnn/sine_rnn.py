@@ -20,12 +20,12 @@ def make_sines(n_timesteps, n_offsets, harmonic=False, square=False):
     # Generate sinewaves offset in phase
     n_full = n_timesteps
     d1 = 3 * np.arange(n_full) / (2 * np.pi)
-    d2 = 3 * np.arange(minibatch_size) / (2 * np.pi)
+    d2 = 3 * np.arange(n_offsets) / (2 * np.pi)
     full_sines = np.sin(np.array([d1] * n_offsets).T + d2).astype("float32")
     # Uncomment to add harmonics
     if harmonic:
-        full_sines += np.sin(np.array([1.7 * d1] * minibatch_size).T + d2)
-        full_sines += np.sin(np.array([7.362 * d1] * minibatch_size).T + d2)
+        full_sines += np.sin(np.array([1.7 * d1] * n_offsets).T + d2)
+        full_sines += np.sin(np.array([7.362 * d1] * n_offsets).T + d2)
     if square:
         full_sines[full_sines <= 0] = 0
         full_sines[full_sines > 0] = 1

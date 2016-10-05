@@ -97,12 +97,21 @@ def get_name():
 
 
 def get_script():
-    script_path = main.__file__
-    script_name = script_path.split(os.path.sep)[-1].split(".")[0]
-    # gotta play games for slurm runner
-    if "slurm" in script_name:
+    py_file = None
+    for argv in sys.argv[::-1]:
+        if argv[-3:] == ".py":
+            py_file = argv
+        # slurm_script
+        elif "slurm_" in argv:
+            py_file = argv
+    if "slurm" in py_file:
         script_name = os.environ['SLURM_JOB_NAME']
         script_name = script_name.split(".")[0]
+    else:
+        assert py_file is not None
+        script_path = os.path.abspath(py_file)
+        script_name = script_path.split(os.path.sep)[-1].split(".")[0]
+        # gotta play games for slurm runner
     return script_name
 
 
@@ -214,6 +223,16 @@ def convert_to_one_hot(itr, n_classes, dtype="int32"):
     return one_hot
 
 
+def _special_check():
+    ip_addr = socket.gethostbyname(socket.gethostname())
+    subnet = ".".join(ip_addr.split(".")[:-1])
+    if subnet == "132.204.25":
+        logger.info("Found special runtime environment")
+        return True
+    else:
+        return False
+
+
 # decided at import, should be consistent over training
 checkpoint_uuid = get_name()[:6]
 def get_checkpoint_dir(checkpoint_dir=None, folder=None, create_dir=True):
@@ -221,6 +240,11 @@ def get_checkpoint_dir(checkpoint_dir=None, folder=None, create_dir=True):
     if checkpoint_dir is None:
         checkpoint_dir = os.getenv("DAGBLDR_MODELS", os.path.join(
             os.path.expanduser("~"), "dagbldr_models"))
+
+        # Figure out if this is necessary to run on localdisk @ U de M
+        if _special_check():
+            checkpoint_dir = "/Tmp/kastner/dagbldr_models"
+
 
     if folder is None:
         checkpoint_name = get_script()
@@ -531,15 +555,17 @@ def archive_dagbldr():
     try:
         theano_flags = os.environ["THEANO_FLAGS"]
         command_string = 'THEANO_FLAGS="' + theano_flags + '" ' + "python "
-        command_string += " ".join(sys.argv)
+        command_string += get_script() + ".py "
+        command_string += " ".join(sys.argv[1:])
     except KeyError:
-        command_string = "python " + " ".join(sys.argv)
+        command_string += get_script() + ".py "
+        command_string += " ".join(sys.argv[1:])
     command_script_path = code_snapshot_dir + os.path.sep + "run.sh"
     if not os.path.exists(command_script_path):
         with open(command_script_path, 'w') as f:
             f.writelines(command_string)
 
-    save_script_path = code_snapshot_dir + os.path.sep + get_script()
+    save_script_path = code_snapshot_dir + os.path.sep + get_script() + ".py"
     lib_dir = str(os.sep).join(save_script_path.split(os.sep)[:-2])
     save_lib_path = code_snapshot_dir + os.path.sep + "dagbldr_archive.zip"
 
@@ -548,14 +574,8 @@ def archive_dagbldr():
     empty = all([len(l) == 0 for l in (existing_reports, existing_models)])
     if not os.path.exists(save_script_path) or empty:
         logger.info("Saving code archive %s at %s" % (lib_dir, save_lib_path))
-        script_name = main.__file__.split(os.path.sep)[-1]
-        p = None
-        for argv in sys.argv[::-1]:
-            if script_name in argv:
-                p = argv
-        if p is None:
-            raise ValueError("No script found?")
-        script_location = os.path.abspath(p)
+        script_name = get_script() + ".py"
+        script_location = os.path.abspath(script_name)
         shutil.copy2(script_location, save_script_path)
         zip_dir(lib_dir, save_lib_path)
 
@@ -1540,10 +1560,8 @@ def run_loop(train_loop_function, train_itr,
     # Timed versus forced here
     tcw = threaded_timed_writer(write_every_n_seconds)
     vcw = threaded_timed_writer(write_every_n_seconds)
-    ip_addr = socket.gethostbyname(socket.gethostname())
-    subnet = ".".join(ip_addr.split(".")[:-1])
-    if subnet == "132.204.25":
-        logger.info("Found special subnet, using slow write mode")
+
+    if _special_check():
         fcw = threaded_timed_writer(sleep_time=write_every_n_seconds)
     else:
         fcw = threaded_timed_writer(sleep_time=0)

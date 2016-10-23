@@ -169,10 +169,10 @@ def stft(X, fftsize=128, step="half", mean_normalize=True, real=False,
     Compute STFT for 1D real valued input X
     """
     if real:
-        local_fft = np.fft.rfft
+        local_fft = fftpack.rfft
         cut = -1
     else:
-        local_fft = np.fft.fft
+        local_fft = fftpack.fft
         cut = None
     if compute_onesided:
         cut = fftsize // 2
@@ -189,25 +189,28 @@ def stft(X, fftsize=128, step="half", mean_normalize=True, real=False,
     return X
 
 
-def istft(X, fftsize=128, mean_normalize=True, real=False,
-          compute_onesided=True):
+def istft(X, fftsize=128, step="half", wsola=False, mean_normalize=True,
+          real=False, compute_onesided=True):
     """
     Compute ISTFT for STFT transformed X
     """
     if real:
-        local_ifft = np.fft.irfft
+        local_ifft = fftpack.irfft
         X_pad = np.zeros((X.shape[0], X.shape[1] + 1)) + 0j
         X_pad[:, :-1] = X
         X = X_pad
     else:
-        local_ifft = np.fft.ifft
+        local_ifft = fftpack.ifft
     if compute_onesided:
         X_pad = np.zeros((X.shape[0], 2 * X.shape[1])) + 0j
         X_pad[:, :fftsize // 2] = X
         X_pad[:, fftsize // 2:] = 0
         X = X_pad
     X = local_ifft(X).astype("float64")
-    X = invert_halfoverlap(X)
+    if step == "half":
+        X = invert_halfoverlap(X)
+    else:
+        X = overlap_add(X, step, wsola=wsola)
     if mean_normalize:
         X -= np.mean(X)
     return X
@@ -245,17 +248,17 @@ def nsgcwin(fmin, fmax, n_bins, fs, signal_len, gamma):
 
     References
     ----------
-    Velasco G. A., Holighaus N., Dörfler M., Grill T.
+    Velasco G. A., Holighaus N., Dorfler M., Grill T.
     Constructing an invertible constant-Q transform with nonstationary Gabor
     frames, Proceedings of the 14th International Conference on Digital
     Audio Effects (DAFx 11), Paris, France, 2011
 
-    Holighaus N., Dörﬂer M., Velasco G. A. and Grill T.
+    Holighaus N., Dorfler M., Velasco G. A. and Grill T.
     A framework for invertible, real-time constant-Q transforms, submitted.
 
     Original matlab code copyright follows:
 
-    AUTHOR(s) : Monika Dörfler, Gino Angelo Velasco, Nicki Holighaus, 2010-2011
+    AUTHOR(s) : Monika Dorfler, Gino Angelo Velasco, Nicki Holighaus, 2010-2011
 
     COPYRIGHT : (c) NUHAG, Dept.Math., University of Vienna, AUSTRIA
     http://nuhag.eu/
@@ -364,17 +367,17 @@ def nsgtf_real(X, multiscale, shift, window_lens):
 
     References
     ----------
-    Velasco G. A., Holighaus N., Dörfler M., Grill T.
+    Velasco G. A., Holighaus N., Dorfler M., Grill T.
     Constructing an invertible constant-Q transform with nonstationary Gabor
     frames, Proceedings of the 14th International Conference on Digital
     Audio Effects (DAFx 11), Paris, France, 2011
 
-    Holighaus N., Dörﬂer M., Velasco G. A. and Grill T.
+    Holighaus N., Dorfler M., Velasco G. A. and Grill T.
     A framework for invertible, real-time constant-Q transforms, submitted.
 
     Original matlab code copyright follows:
 
-    AUTHOR(s) : Monika Dörfler, Gino Angelo Velasco, Nicki Holighaus, 2010-2011
+    AUTHOR(s) : Monika Dorfler, Gino Angelo Velasco, Nicki Holighaus, 2010-2011
 
     COPYRIGHT : (c) NUHAG, Dept.Math., University of Vienna, AUSTRIA
     http://nuhag.eu/
@@ -435,17 +438,17 @@ def nsdual(multiscale, shift, window_lens):
 
     References
     ----------
-    Velasco G. A., Holighaus N., Dörfler M., Grill T.
+    Velasco G. A., Holighaus N., Dorfler M., Grill T.
     Constructing an invertible constant-Q transform with nonstationary Gabor
     frames, Proceedings of the 14th International Conference on Digital
     Audio Effects (DAFx 11), Paris, France, 2011
 
-    Holighaus N., Dörﬂer M., Velasco G. A. and Grill T.
+    Holighaus N., Dorfler M., Velasco G. A. and Grill T.
     A framework for invertible, real-time constant-Q transforms, submitted.
 
     Original matlab code copyright follows:
 
-    AUTHOR(s) : Monika Dörfler, Gino Angelo Velasco, Nicki Holighaus, 2010-2011
+    AUTHOR(s) : Monika Dorfler, Gino Angelo Velasco, Nicki Holighaus, 2010-2011
 
     COPYRIGHT : (c) NUHAG, Dept.Math., University of Vienna, AUSTRIA
     http://nuhag.eu/
@@ -483,17 +486,17 @@ def nsgitf_real(c, c_dc, c_nyq, multiscale, shift):
 
     References
     ----------
-    Velasco G. A., Holighaus N., Dörfler M., Grill T.
+    Velasco G. A., Holighaus N., Dorfler M., Grill T.
     Constructing an invertible constant-Q transform with nonstationary Gabor
     frames, Proceedings of the 14th International Conference on Digital
     Audio Effects (DAFx 11), Paris, France, 2011
 
-    Holighaus N., Dörﬂer M., Velasco G. A. and Grill T.
+    Holighaus N., Dorfler M., Velasco G. A. and Grill T.
     A framework for invertible, real-time constant-Q transforms, submitted.
 
     Original matlab code copyright follows:
 
-    AUTHOR(s) : Monika Dörfler, Gino Angelo Velasco, Nicki Holighaus, 2010-2011
+    AUTHOR(s) : Monika Dorfler, Gino Angelo Velasco, Nicki Holighaus, 2010-2011
 
     COPYRIGHT : (c) NUHAG, Dept.Math., University of Vienna, AUSTRIA
     http://nuhag.eu/
@@ -546,17 +549,17 @@ def cqt(X, fs, n_bins=48, fmin=27.5, fmax="nyq", gamma=20):
 
     References
     ----------
-    Velasco G. A., Holighaus N., Dörfler M., Grill T.
+    Velasco G. A., Holighaus N., Dorfler M., Grill T.
     Constructing an invertible constant-Q transform with nonstationary Gabor
     frames, Proceedings of the 14th International Conference on Digital
     Audio Effects (DAFx 11), Paris, France, 2011
 
-    Holighaus N., Dörﬂer M., Velasco G. A. and Grill T.
+    Holighaus N., Dorfler M., Velasco G. A. and Grill T.
     A framework for invertible, real-time constant-Q transforms, submitted.
 
     Original matlab code copyright follows:
 
-    AUTHOR(s) : Monika Dörfler, Gino Angelo Velasco, Nicki Holighaus, 2010-2011
+    AUTHOR(s) : Monika Dorfler, Gino Angelo Velasco, Nicki Holighaus, 2010-2011
 
     COPYRIGHT : (c) NUHAG, Dept.Math., University of Vienna, AUSTRIA
     http://nuhag.eu/
@@ -591,17 +594,17 @@ def icqt(X_cq, c_dc, c_nyq, multiscale, shift, window_lens):
 
     References
     ----------
-    Velasco G. A., Holighaus N., Dörfler M., Grill T.
+    Velasco G. A., Holighaus N., Dorfler M., Grill T.
     Constructing an invertible constant-Q transform with nonstationary Gabor
     frames, Proceedings of the 14th International Conference on Digital
     Audio Effects (DAFx 11), Paris, France, 2011
 
-    Holighaus N., Dörﬂer M., Velasco G. A. and Grill T.
+    Holighaus N., Dorfler M., Velasco G. A. and Grill T.
     A framework for invertible, real-time constant-Q transforms, submitted.
 
     Original matlab code copyright follows:
 
-    AUTHOR(s) : Monika Dörfler, Gino Angelo Velasco, Nicki Holighaus, 2010-2011
+    AUTHOR(s) : Monika Dorfler, Gino Angelo Velasco, Nicki Holighaus, 2010-2011
 
     COPYRIGHT : (c) NUHAG, Dept.Math., University of Vienna, AUSTRIA
     http://nuhag.eu/
@@ -678,7 +681,10 @@ def voiced_unvoiced(X, window_size=256, window_step=128, copy=True):
             strength_factor = .3
         start = np.where(right_XX_corr < .3 * XX_corr[center])[0]
         # 20 is hardcoded but should depend on samplerate?
-        start = np.max([20, start[0]])
+        try:
+            start = np.max([20, start[0]])
+        except IndexError:
+            start = 20
         search_corr = right_XX_corr[start:]
         index = np.argmax(search_corr)
         second_max = search_corr[index]
@@ -700,7 +706,7 @@ def lpc_analysis(X, order=8, window_step=128, window_size=2 * 128,
     Based on code from:
         http://labrosa.ee.columbia.edu/matlab/sws/
 
-    Parameters
+    _rParameters
     ----------
     X : ndarray
         Signals to extract LPC coefficients from
@@ -797,6 +803,112 @@ def lpc_analysis(X, order=8, window_step=128, window_size=2 * 128,
     return lp_coefficients, per_frame_gain, residual_excitation
 
 
+def lpc_to_frequency(lp_coefficients, per_frame_gain):
+    """
+    Extract resonant frequencies and magnitudes from LPC coefficients and gains.
+    Parameters
+    ----------
+    lp_coefficients : ndarray
+        LPC coefficients, such as those calculated by ``lpc_analysis``
+
+    per_frame_gain : ndarray
+       Gain calculated for each frame, such as those calculated
+       by ``lpc_analysis``
+
+    Returns
+    -------
+    frequencies : ndarray
+       Resonant frequencies calculated from LPC coefficients and gain. Returned
+       frequencies are from 0 to 2 * pi
+
+    magnitudes : ndarray
+       Magnitudes of resonant frequencies
+
+    References
+    ----------
+    D. P. W. Ellis (2004), "Sinewave Speech Analysis/Synthesis in Matlab",
+    Web resource, available: http://www.ee.columbia.edu/ln/labrosa/matlab/sws/
+    """
+    n_windows, order = lp_coefficients.shape
+
+    frame_frequencies = np.zeros((n_windows, (order - 1) // 2))
+    frame_magnitudes = np.zeros_like(frame_frequencies)
+
+    for window in range(n_windows):
+        w_coefs = lp_coefficients[window]
+        g_coefs = per_frame_gain[window]
+        roots = np.roots(np.hstack(([1], w_coefs[1:])))
+        # Roots doesn't return the same thing as MATLAB... agh
+        frequencies, index = np.unique(
+            np.abs(np.angle(roots)), return_index=True)
+        # Make sure 0 doesn't show up...
+        gtz = np.where(frequencies > 0)[0]
+        frequencies = frequencies[gtz]
+        index = index[gtz]
+        magnitudes = g_coefs / (1. - np.abs(roots))
+        sort_index = np.argsort(frequencies)
+        frame_frequencies[window, :len(sort_index)] = frequencies[sort_index]
+        frame_magnitudes[window, :len(sort_index)] = magnitudes[sort_index]
+    return frame_frequencies, frame_magnitudes
+
+
+def lpc_to_lsf(all_lpc):
+    if len(all_lpc.shape) < 2:
+        all_lpc = all_lpc[None]
+    order = all_lpc.shape[1] - 1
+    all_lsf = np.zeros((len(all_lpc), order))
+    for i in range(len(all_lpc)):
+        lpc = all_lpc[i]
+        lpc1 = np.append(lpc, 0)
+        lpc2 = lpc1[::-1]
+        sum_filt = lpc1 + lpc2
+        diff_filt = lpc1 - lpc2
+
+        if order % 2 != 0:
+            deconv_diff, _ = sg.deconvolve(diff_filt, [1, 0, -1])
+            deconv_sum = sum_filt
+        else:
+            deconv_diff, _ = sg.deconvolve(diff_filt, [1, -1])
+            deconv_sum, _ = sg.deconvolve(sum_filt, [1, 1])
+
+        roots_diff = np.roots(deconv_diff)
+        roots_sum = np.roots(deconv_sum)
+        angle_diff = np.angle(roots_diff[::2])
+        angle_sum = np.angle(roots_sum[::2])
+        lsf = np.sort(np.hstack((angle_diff, angle_sum)))
+        if len(lsf) != 0:
+            all_lsf[i] = lsf
+    return np.squeeze(all_lsf)
+
+
+def lsf_to_lpc(all_lsf):
+    if len(all_lsf.shape) < 2:
+        all_lsf = all_lsf[None]
+    order = all_lsf.shape[1]
+    all_lpc = np.zeros((len(all_lsf), order + 1))
+    for i in range(len(all_lsf)):
+        lsf = all_lsf[i]
+        zeros = np.exp(1j * lsf)
+        sum_zeros = zeros[::2]
+        diff_zeros = zeros[1::2]
+        sum_zeros = np.hstack((sum_zeros, np.conj(sum_zeros)))
+        diff_zeros = np.hstack((diff_zeros, np.conj(diff_zeros)))
+        sum_filt = np.poly(sum_zeros)
+        diff_filt = np.poly(diff_zeros)
+
+        if order % 2 != 0:
+            deconv_diff = sg.convolve(diff_filt, [1, 0, -1])
+            deconv_sum = sum_filt
+        else:
+            deconv_diff = sg.convolve(diff_filt, [1, -1])
+            deconv_sum = sg.convolve(sum_filt, [1, 1])
+
+        lpc = .5 * (deconv_sum + deconv_diff)
+        # Last coefficient is 0 and not returned
+        all_lpc[i] = lpc[:-1]
+    return np.squeeze(all_lpc)
+
+
 def lpc_synthesis(lp_coefficients, per_frame_gain, residual_excitation=None,
                   voiced_frames=None, window_step=128, emphasis=0.9):
     """
@@ -854,7 +966,7 @@ def lpc_synthesis(lp_coefficients, per_frame_gain, residual_excitation=None,
     if residual_excitation is None:
         # Need to generate excitation
         if voiced_frames is None:
-            # No voiced/unvoiced info, so just use randn
+            # No voiced/unvoiced info
             voiced_frames = np.ones((lp_coefficients.shape[0], 1))
         residual_excitation = np.zeros((n_excitation_points))
         f, m = lpc_to_frequency(lp_coefficients, per_frame_gain)
@@ -899,7 +1011,7 @@ def lpc_synthesis(lp_coefficients, per_frame_gain, residual_excitation=None,
     return synthesized
 
 
-def soundsc(X, copy=True):
+def soundsc(X, gain_scale=.9, copy=True):
     """
     Approximate implementation of soundsc from MATLAB without the audio playing.
 
@@ -908,69 +1020,112 @@ def soundsc(X, copy=True):
     X : ndarray
         Signal to be rescaled
 
+    gain_scale : float
+        Gain multipler, default .9 (90% of maximum representation)
+
     copy : bool, optional (default=True)
         Whether to make a copy of input signal or operate in place.
 
     Returns
     -------
     X_sc : ndarray
-        (-1, 1) scaled version of X as float32, suitable for writing
+        (-32767, 32767) scaled version of X as int16, suitable for writing
         with scipy.io.wavfile
     """
     X = np.array(X, copy=copy)
     X = (X - X.min()) / (X.max() - X.min())
-    X = .9 * X
     X = 2 * X - 1
-    return X.astype('float32')
+    X = gain_scale * X
+    X = X * 2 ** 15
+    return X.astype('int16')
 
 
-def lpc_to_frequency(lp_coefficients, per_frame_gain):
+def _wav2array(nchannels, sampwidth, data):
+    # wavio.py
+    # Author: Warren Weckesser
+    # License: BSD 3-Clause (http://opensource.org/licenses/BSD-3-Clause)
+
+    """data must be the string containing the bytes from the wav file."""
+    num_samples, remainder = divmod(len(data), sampwidth * nchannels)
+    if remainder > 0:
+        raise ValueError('The length of data is not a multiple of '
+                         'sampwidth * num_channels.')
+    if sampwidth > 4:
+        raise ValueError("sampwidth must not be greater than 4.")
+
+    if sampwidth == 3:
+        a = np.empty((num_samples, nchannels, 4), dtype=np.uint8)
+        raw_bytes = np.fromstring(data, dtype=np.uint8)
+        a[:, :, :sampwidth] = raw_bytes.reshape(-1, nchannels, sampwidth)
+        a[:, :, sampwidth:] = (a[:, :, sampwidth - 1:sampwidth] >> 7) * 255
+        result = a.view('<i4').reshape(a.shape[:-1])
+    else:
+        # 8 bit samples are stored as unsigned ints; others as signed ints.
+        dt_char = 'u' if sampwidth == 1 else 'i'
+        a = np.fromstring(data, dtype='<%s%d' % (dt_char, sampwidth))
+        result = a.reshape(-1, nchannels)
+    return result
+
+
+def readwav(file):
+    # wavio.py
+    # Author: Warren Weckesser
+    # License: BSD 3-Clause (http://opensource.org/licenses/BSD-3-Clause)
     """
-    Extract resonant frequencies and magnitudes from LPC coefficients and gains.
-    Parameters
-    ----------
-    lp_coefficients : ndarray
-        LPC coefficients, such as those calculated by ``lpc_analysis``
+    Read a wav file.
 
-    per_frame_gain : ndarray
-       Gain calculated for each frame, such as those calculated
-       by ``lpc_analysis``
+    Returns the frame rate, sample width (in bytes) and a numpy array
+    containing the data.
 
-    Returns
-    -------
-    frequencies : ndarray
-       Resonant frequencies calculated from LPC coefficients and gain. Returned
-       frequencies are from 0 to 2 * pi
-
-    magnitudes : ndarray
-       Magnitudes of resonant frequencies
-
-    References
-    ----------
-    D. P. W. Ellis (2004), "Sinewave Speech Analysis/Synthesis in Matlab",
-    Web resource, available: http://www.ee.columbia.edu/ln/labrosa/matlab/sws/
+    This function does not read compressed wav files.
     """
-    n_windows, order = lp_coefficients.shape
+    wav = wave.open(file)
+    rate = wav.getframerate()
+    nchannels = wav.getnchannels()
+    sampwidth = wav.getsampwidth()
+    nframes = wav.getnframes()
+    data = wav.readframes(nframes)
+    wav.close()
+    array = _wav2array(nchannels, sampwidth, data)
+    return rate, sampwidth, array
 
-    frame_frequencies = np.zeros((n_windows, (order - 1) // 2))
-    frame_magnitudes = np.zeros_like(frame_frequencies)
 
-    for window in range(n_windows):
-        w_coefs = lp_coefficients[window]
-        g_coefs = per_frame_gain[window]
-        roots = np.roots(np.hstack(([1], w_coefs[1:])))
-        # Roots doesn't return the same thing as MATLAB... agh
-        frequencies, index = np.unique(
-            np.abs(np.angle(roots)), return_index=True)
-        # Make sure 0 doesn't show up...
-        gtz = np.where(frequencies > 0)[0]
-        frequencies = frequencies[gtz]
-        index = index[gtz]
-        magnitudes = g_coefs / (1. - np.abs(roots))
-        sort_index = np.argsort(frequencies)
-        frame_frequencies[window, :len(sort_index)] = frequencies[sort_index]
-        frame_magnitudes[window, :len(sort_index)] = magnitudes[sort_index]
-    return frame_frequencies, frame_magnitudes
+def csvd(arr):
+    """
+    Do the complex SVD of a 2D array, returning real valued U, S, VT
+
+    http://stemblab.github.io/complex-svd/
+    """
+    C_r = arr.real
+    C_i = arr.imag
+    block_x = C_r.shape[0]
+    block_y = C_r.shape[1]
+    K = np.zeros((2 * block_x, 2 * block_y))
+    # Upper left
+    K[:block_x, :block_y] = C_r
+    # Lower left
+    K[:block_x, block_y:] = C_i
+    # Upper right
+    K[block_x:, :block_y] = -C_i
+    # Lower right
+    K[block_x:, block_y:] = C_r
+    return svd(K, full_matrices=False)
+
+
+def icsvd(U, S, VT):
+    """
+    Invert back to complex values from the output of csvd
+
+    U, S, VT = csvd(X)
+    X_rec = inv_csvd(U, S, VT)
+    """
+    K = U.dot(np.diag(S)).dot(VT)
+    block_x = U.shape[0] // 2
+    block_y = U.shape[1] // 2
+    arr_rec = np.zeros((block_x, block_y)) + 0j
+    arr_rec.real = K[:block_x, :block_y]
+    arr_rec.imag = K[:block_x, block_y:]
+    return arr_rec
 
 
 def sinusoid_analysis(X, input_sample_rate, resample_block=128, copy=True):
@@ -1221,11 +1376,10 @@ def overlap(X, window_size, window_step):
     # Make sure there are an even number of windows before stridetricks
     append = np.zeros((window_size - len(X) % window_size))
     X = np.hstack((X, append))
-    num_frames = len(X) // window_step - 1
-    row_stride = X.itemsize * window_step
-    col_stride = X.itemsize
-    X_strided = as_strided(X, shape=(num_frames, window_size),
-                           strides=(row_stride, col_stride))
+    overlap_sz = window_size - window_step
+    new_shape = X.shape[:-1] + ((X.shape[-1] - overlap_sz) // window_step, window_size)
+    new_strides = X.strides[:-1] + (window_step * X.strides[-1],) + X.strides[-1:]
+    X_strided = as_strided(X, shape=new_shape, strides=new_strides)
     return X_strided
 
 
@@ -1287,42 +1441,55 @@ def invert_halfoverlap(X_strided):
     return X
 
 
-def csvd(arr):
+def overlap_add(X_strided, window_step, wsola=False):
     """
-    Do the complex SVD of a 2D array, returning real valued U, S, VT
+    overlap add to reconstruct X
 
-    http://stemblab.github.io/complex-svd/
+    Parameters
+    ----------
+    X_strided : ndarray, shape=(n_windows, window_size)
+        X as overlapped windows
+
+    window_step : int
+       step size for overlap add
+
+    Returns
+    -------
+    X : ndarray, shape=(n_samples,)
+        Reconstructed version of X
     """
-    C_r = arr.real
-    C_i = arr.imag
-    block_x = C_r.shape[0]
-    block_y = C_r.shape[1]
-    K = np.zeros((2 * block_x, 2 * block_y))
-    # Upper left
-    K[:block_x, :block_y] = C_r
-    # Lower left
-    K[:block_x, block_y:] = C_i
-    # Upper right
-    K[block_x:, :block_y] = -C_i
-    # Lower right
-    K[block_x:, block_y:] = C_r
-    return svd(K, full_matrices=False)
+    n_rows, window_size = X_strided.shape
 
+    # Start with largest size (no overlap) then truncate after we finish
+    # +2 for one window on each side
+    X = np.zeros(((n_rows + 2) * window_size,)).astype(X_strided.dtype)
+    start_index = 0
 
-def icsvd(U, S, VT):
-    """
-    Invert back to complex values from the output of csvd
-
-    U, S, VT = csvd(X)
-    X_rec = inv_csvd(U, S, VT)
-    """
-    K = U.dot(np.diag(S)).dot(VT)
-    block_x = U.shape[0] // 2
-    block_y = U.shape[1] // 2
-    arr_rec = np.zeros((block_x, block_y)) + 0j
-    arr_rec.real = K[:block_x, :block_y]
-    arr_rec.imag = K[:block_x, block_y:]
-    return arr_rec
+    total_windowing_sum = np.zeros((X.shape[0]))
+    win = 0.54 - .46 * np.cos(2 * np.pi * np.arange(window_size) / (
+        window_size - 1))
+    for i in range(n_rows):
+        end_index = start_index + window_size
+        if wsola:
+            offset_size = window_size - window_step
+            offset = xcorr_offset(X[start_index:start_index + offset_size],
+                                  X_strided[i, :offset_size])
+            ss = start_index - offset
+            st = end_index - offset
+            if start_index - offset < 0:
+                ss = 0
+                st = 0 + (end_index - start_index)
+            X[ss:st] += X_strided[i]
+            total_windowing_sum[ss:st] += win
+            start_index = start_index + window_step
+        else:
+            X[start_index:end_index] += X_strided[i]
+            total_windowing_sum[start_index:end_index] += win
+            start_index += window_step
+    # Not using this right now
+    #X = np.real(X) / (total_windowing_sum + 1)
+    X = X[:end_index]
+    return X
 
 
 def overlap_compress(X, n_components, window_size):
@@ -1377,63 +1544,6 @@ def overlap_uncompress(X_compressed, window_size):
         X_compressed = np.hstack((X_compressed, append))
     X_r = fftpack.idct(X_compressed, norm='ortho')
     return invert_halfoverlap(X_r)
-
-
-def lpc_to_lsf(all_lpc):
-    if len(all_lpc.shape) < 2:
-        all_lpc = all_lpc[None]
-    order = all_lpc.shape[1] - 1
-    all_lsf = np.zeros((len(all_lpc), order))
-    for i in range(len(all_lpc)):
-        lpc = all_lpc[i]
-        lpc1 = np.append(lpc, 0)
-        lpc2 = lpc1[::-1]
-        sum_filt = lpc1 + lpc2
-        diff_filt = lpc1 - lpc2
-
-        if order % 2 != 0:
-            deconv_diff, _ = sg.deconvolve(diff_filt, [1, 0, -1])
-            deconv_sum = sum_filt
-        else:
-            deconv_diff, _ = sg.deconvolve(diff_filt, [1, -1])
-            deconv_sum, _ = sg.deconvolve(sum_filt, [1, 1])
-
-        roots_diff = np.roots(deconv_diff)
-        roots_sum = np.roots(deconv_sum)
-        angle_diff = np.angle(roots_diff[::2])
-        angle_sum = np.angle(roots_sum[::2])
-        lsf = np.sort(np.hstack((angle_diff, angle_sum)))
-        if len(lsf) != 0:
-            all_lsf[i] = lsf
-    return np.squeeze(all_lsf)
-
-
-def lsf_to_lpc(all_lsf):
-    if len(all_lsf.shape) < 2:
-        all_lsf = all_lsf[None]
-    order = all_lsf.shape[1]
-    all_lpc = np.zeros((len(all_lsf), order + 1))
-    for i in range(len(all_lsf)):
-        lsf = all_lsf[i]
-        zeros = np.exp(1j * lsf)
-        sum_zeros = zeros[::2]
-        diff_zeros = zeros[1::2]
-        sum_zeros = np.hstack((sum_zeros, np.conj(sum_zeros)))
-        diff_zeros = np.hstack((diff_zeros, np.conj(diff_zeros)))
-        sum_filt = np.poly(sum_zeros)
-        diff_filt = np.poly(diff_zeros)
-
-        if order % 2 != 0:
-            deconv_diff = sg.convolve(diff_filt, [1, 0, -1])
-            deconv_sum = sum_filt
-        else:
-            deconv_diff = sg.convolve(diff_filt, [1, -1])
-            deconv_sum = sg.convolve(sum_filt, [1, 1])
-
-        lpc = .5 * (deconv_sum + deconv_diff)
-        # Last coefficient is 0 and not returned
-        all_lpc[i] = lpc[:-1]
-    return np.squeeze(all_lpc)
 
 
 def herz_to_mel(freqs):
@@ -1508,7 +1618,7 @@ def mel_freq_weights(n_fft, fs, n_filts=None, width=None):
     fft_freqs = np.arange(n_fft // 2) / n_fft * fs
     min_mel = herz_to_mel(min_freq)
     max_mel = herz_to_mel(max_freq)
-    partial = np.arange(n_filts + 2) / (n_filts + 1) * (max_mel - min_mel)
+    partial = np.arange(n_filts + 2) / (n_filts + 1.) * (max_mel - min_mel)
     bin_freqs = mel_to_herz(min_mel + partial)
     bin_bin = np.round(bin_freqs / fs * (n_fft - 1))
     for i in range(n_filts):
@@ -1622,6 +1732,14 @@ def abs_and_angle_to_complex(arr_abs, arr_angle):
     return arr_abs * np.exp(1j * arr_angle)
 
 
+def angle_to_sin_cos(arr_angle):
+    return np.hstack((np.sin(arr_angle), np.cos(arr_angle)))
+
+
+def sin_cos_to_angle(arr_sin, arr_cos):
+    return np.arctan2(arr_sin, arr_cos)
+
+
 def polyphase_core(x, m, f):
     # x = input data
     # m = decimation rate
@@ -1691,14 +1809,6 @@ def unwindow(arr, window_size, window_step=1, axis=0):
     unwindowed = np.tile(arr[:, None, ...], (1, window_step, 1, 1))
     unwindowed = unwindowed.reshape(shp[0] * window_step, *shp[1:])
     return unwindowed.mean(axis=1)
-
-
-def angle_to_sin_cos(arr_angle):
-    return np.hstack((np.sin(arr_angle), np.cos(arr_angle)))
-
-
-def sin_cos_to_angle(arr_sin, arr_cos):
-    return np.arctan2(arr_sin, arr_cos)
 
 
 def xcorr_offset(x1, x2):
@@ -1792,7 +1902,8 @@ def invert_spectrogram(X_s, step, calculate_offset=True, set_zero_phase=True):
     return wave
 
 
-def iterate_invert_spectrogram(X_s, fftsize, step, n_iter=10, verbose=False):
+def iterate_invert_spectrogram(X_s, fftsize, step, n_iter=10, verbose=False,
+                               complex_input=False):
     """
     Under MSR-LA License
 
@@ -1818,7 +1929,7 @@ def iterate_invert_spectrogram(X_s, fftsize, step, n_iter=10, verbose=False):
     for i in range(n_iter):
         if verbose:
             print("Runnning iter %i" % i)
-        if i == 0:
+        if i == 0 and not complex_input:
             X_t = invert_spectrogram(X_best, step, calculate_offset=True,
                                      set_zero_phase=True)
         else:
@@ -1829,7 +1940,9 @@ def iterate_invert_spectrogram(X_s, fftsize, step, n_iter=10, verbose=False):
                                      set_zero_phase=False)
         est = stft(X_t, fftsize=fftsize, step=step, compute_onesided=False)
         phase = est / np.maximum(reg, np.abs(est))
-        X_best = X_s * phase[:len(X_s)]
+        phase = phase[:len(X_s)]
+        X_s = X_s[:len(phase)]
+        X_best = X_s * phase
     X_t = invert_spectrogram(X_best, step, calculate_offset=True,
                              set_zero_phase=False)
     return np.real(X_t)
@@ -2274,11 +2387,11 @@ if __name__ == "__main__":
     Trying to run all examples will seg fault on my laptop - probably memory!
     Comment individually
     """
-    # run_phase_reconstruction_example()
-    # run_phase_vq_example()
-    # run_dct_vq_example()
-    # run_fft_vq_example()
-    # run_lpc_example()
-    # run_cqt_example()
-    run_fft_dct_example()
-    test_all()
+    run_phase_reconstruction_example()
+    #run_phase_vq_example()
+    #run_dct_vq_example()
+    #run_fft_vq_example()
+    #run_lpc_example()
+    #run_cqt_example()
+    #run_fft_dct_example()
+    #test_all()

@@ -7,8 +7,9 @@ from collections import Counter
 from scipy.io import loadmat, wavfile
 from scipy.linalg import svd
 from functools import reduce
-from ..core import whitespace_tokenizer, safe_zip
+from ..core import whitespace_tokenizer, safe_zip, get_logger
 from .preprocessing_utils import stft
+import shutil
 import string
 import tarfile
 import fnmatch
@@ -22,6 +23,8 @@ try:
     import cPickle as pickle
 except ImportError:
     import pickle
+
+logger = get_logger()
 
 regex = re.compile('[%s]' % re.escape(string.punctuation))
 
@@ -1230,3 +1233,174 @@ def fetch_iamondb():
     with open(pickle_path, "rb") as f:
         pickle_dict = pickle.load(f)
     return pickle_dict
+
+
+def check_fetch_bach_chorales_music21():
+    """ Move files into dagbldr dir, in case python is on nfs. """
+    from music21 import corpus
+    all_bach_paths = corpus.getComposer("bach")
+    partial_path = get_dataset_dir("bach_chorales_music21")
+    for path in all_bach_paths:
+        if "riemenschneider" in path:
+            continue
+        filename = os.path.split(path)[-1]
+        local_path = os.path.join(partial_path, filename)
+        if not os.path.exists(local_path):
+            shutil.copy2(path, local_path)
+    return partial_path
+
+
+def music_21_to_pitch_duration(p):
+    """
+    Takes in a Music21 score, and outputs two numpy arrays
+    One for pitch
+    One for duration
+    """
+    parts = []
+    parts_times = []
+    for i, pi in enumerate(p.parts):
+        part = []
+        part_time = []
+        for n in pi.stream().flat.notesAndRests:
+            if n.isRest:
+                part.append(0)
+            else:
+                part.append(n.midi)
+            part_time.append(n.duration.quarterLength)
+        parts.append(part)
+        parts_times.append(part_time)
+
+    # Create a "block" of events and times
+    cumulative_times = map(lambda x: list(np.cumsum(x)), parts_times)
+    event_points = sorted(list(set(sum(cumulative_times, []))))
+    maxlen = max(map(len, cumulative_times))
+    # -1 marks invalid / unused
+    part_block = np.zeros((len(p.parts), maxlen)).astype("int32") - 1
+    ctime_block = np.zeros((len(p.parts), maxlen)).astype("float32") - 1
+    time_block = np.zeros((len(p.parts), maxlen)).astype("float32") - 1
+    # create numpy array for easier indexing
+    for i in range(len(parts)):
+        part_block[i, :len(parts[i])] = parts[i]
+        ctime_block[i, :len(cumulative_times[i])] = cumulative_times[i]
+        time_block[i, :len(parts_times[i])] = parts_times[i]
+
+    event_block = np.zeros((len(p.parts), len(event_points))) - 1
+    etime_block = np.zeros((len(p.parts), len(event_points))) - 1
+    for i, e in enumerate(event_points):
+        idx = zip(*np.where(ctime_block == e))
+        for ix in idx:
+            event_block[ix[0], i] = part_block[ix[0], ix[1]]
+            etime_block[ix[0], i] = time_block[ix[0], ix[1]]
+    return event_block, etime_block
+
+
+def fetch_bach_chorales_music21():
+    """
+    Bach chorales, transposed to C major or C minor (depending on original key).
+    Only contains chorales with 4 voices populated.
+    Requires music21.
+
+    n_timesteps : 34270
+    n_features : 4
+    n_classes : 12 (duration), 54 (pitch)
+
+    Returns
+    -------
+    summary : dict
+        A dictionary cantaining data and image statistics.
+
+        summary["data_pitch"] : array, shape (34270, 4)
+        summary["data_duration"] : array, shape (34270, 4)
+        summary["pitch_list"] : list, len 54
+        summary["duration_list"] : list, len 12
+        summary["major_minor_split"] : int, 16963
+
+    Can split the data to only have major or minor key songs.
+    For major, summary["data_pitch"][:summary["major_minor_split"]]
+    For minor, summary["data_pitch"][summary["major_minor_split"]:]
+    The same operation works for duration.
+
+    pitch_list and duration_list give the mapping back from array value to
+    actual data value.
+    """
+
+    from music21 import converter, interval, pitch
+    data_path = check_fetch_bach_chorales_music21()
+    pickle_path = os.path.join(data_path, "__processed_bach.pkl")
+    if not os.path.exists(pickle_path):
+        logger.info("Pickled file %s not found, creating. This may take a few minutes..." % pickle_path)
+        all_transposed_bach_pitch = []
+        all_transposed_bach_duration = []
+        all_transposed_keys = []
+        files = sorted(os.listdir(data_path))
+        for n, f in enumerate(files):
+            file_path = os.path.join(data_path, f)
+            p = converter.parse(file_path)
+            k = p.analyze("key")
+            i = interval.Interval(k.tonic, pitch.Pitch("C"))
+            p = p.transpose(i)
+            k = p.analyze("key")
+            try:
+                pitches, durations = music_21_to_pitch_duration(p)
+                if pitches.shape[0] != 4:
+                    raise AttributeError("Too many voices, skipping...")
+                all_transposed_bach_pitch.append(pitches)
+                all_transposed_bach_duration.append(durations)
+                all_transposed_keys.append(k.name)
+            except AttributeError:
+                # Random chord? skip it
+                pass
+            if n % 25 == 0:
+                logger.info("Processed %s, progress %s / %s files complete" % (f, n + 1, len(files)))
+        d = {"data_pitch": all_transposed_bach_pitch,
+             "data_duration": all_transposed_bach_duration,
+             "data_key": all_transposed_keys}
+        with open(pickle_path, "wb") as f:
+            logger.info("Saving pickle file %s" % pickle_path)
+            pickle.dump(d, f, -1)
+    else:
+        with open(pickle_path, "rb") as f:
+            d = pickle.load(f)
+
+    major_pitch = []
+    minor_pitch = []
+    major_duration = []
+    minor_duration = []
+    for i in range(len(d["data_key"])):
+        k = d["data_key"][i]
+        ddp = d["data_pitch"][i]
+        ddd = d["data_duration"][i]
+        if k == "C major":
+            major_pitch.append(ddp)
+            major_duration.append(ddd)
+        elif k == "C minor":
+            minor_pitch.append(ddp)
+            minor_duration.append(ddd)
+        else:
+            raise ValueError("Unknown key %s" % k)
+
+    # now do preproc... and add things into the dict
+    dp = np.concatenate(major_pitch + minor_pitch, axis=1)
+    dd = np.concatenate(major_duration + minor_duration, axis=1)
+    major_minor_split = sum([m.shape[1] for m in major_pitch])
+
+    def replace_with_indices(arr):
+        "Inplace but return reference"
+        uniques = np.unique(arr)
+        classes = np.arange(len(uniques))
+        all_idx = [np.where(arr.ravel() == u)[0] for u in uniques]
+
+        for n, (c, idx) in enumerate(zip(classes, all_idx)):
+            arr.flat[idx] = float(n)
+        return arr
+    pitch_list = sorted(np.unique(dp))
+    duration_list = sorted(np.unique(dd))
+
+    dp = replace_with_indices(dp)
+    dd = replace_with_indices(dd)
+    d = {"data_pitch": dp.transpose()[:, ::-1],
+         "data_duration": dd.transpose()[:, ::-1],
+         "pitch_list": pitch_list,
+         "duration_list": duration_list,
+         "major_minor_split": major_minor_split}
+    return d

@@ -3,7 +3,9 @@
 import numpy as np
 from theano import tensor
 import theano
-from ..utils import concatenate
+from ..utils import concatenate, get_logger
+
+logger = get_logger()
 
 
 def binary_crossentropy(predicted_values, true_values):
@@ -73,13 +75,25 @@ def categorical_crossentropy(predicted_values, true_values, eps=0.):
         The cost per sample, or per sample per step if 3D
 
     """
-    indices = tensor.argmax(true_values, axis=-1)
     rows = tensor.arange(true_values.shape[0])
     if eps > 0:
         p = tensor.cast(predicted_values, theano.config.floatX) + eps
         p /= tensor.sum(p, axis=predicted_values.ndim - 1, keepdims=True)
     else:
         p = tensor.cast(predicted_values, theano.config.floatX)
+    if predicted_values.ndim == 3:
+        if true_values.ndim == 2:
+            logger.info("Treating true_values as indices due to shape mismatch in categorical_crossentropy")
+            indices = tensor.cast(true_values, "int32")
+            d0, d1, d2 = p.shape
+            rows = tensor.arange(d0 * d1)
+            pr = p.reshape((d0 * d1, d2))
+            ind = indices.reshape((-1,))
+            res = -tensor.log(pr)[rows, ind]
+            return res.reshape((d0, d1))
+        else:
+            raise ValueError("Unable to expand true_values dimenson to match predicted")
+    indices = tensor.argmax(true_values, axis=-1)
     if predicted_values.ndim < 3:
         return -tensor.log(p)[rows, indices]
     elif predicted_values.ndim == 3:

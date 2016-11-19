@@ -49,6 +49,10 @@ def np_ones(shape):
     return np.ones(shape).astype(_type)
 
 
+def np_unit_uniform(shape, random_state):
+    return np_uniform(shape, random_state, scale=1.)
+
+
 def np_uniform(shape, random_state, scale=0.08):
     """
     Builds a numpy variable filled with uniform random values
@@ -626,6 +630,7 @@ def _batch_normalization(input_variable, name, mode_switch,
 def projection(list_of_inputs, list_of_input_dims, proj_dim, name=None,
                batch_normalize=False, mode_switch=None,
                random_state=None, strict=True,
+               init_weights=None, init_biases=None,
                init_func=np_tanh_fan_uniform, act_func=linear_activation):
     assert len(list_of_input_dims) == len(list_of_inputs)
     conc_input_dim = sum(list_of_input_dims)
@@ -644,7 +649,10 @@ def projection(list_of_inputs, list_of_input_dims, proj_dim, name=None,
                 "Name %s already found in parameters, strict mode!" % name)
     except NameError:
         assert random_state is not None
-        np_W = init_func((conc_input_dim, proj_dim), random_state)
+        if init_weights is None:
+            np_W = init_func((conc_input_dim, proj_dim), random_state)
+        else:
+            np_W = init_weights
         W = as_shared(np_W)
         set_shared(W_name, W)
 
@@ -654,7 +662,10 @@ def projection(list_of_inputs, list_of_input_dims, proj_dim, name=None,
             raise AttributeError(
                 "Name %s already found in parameters, strict mode!" % name)
     except NameError:
-        np_b = np_zeros((proj_dim,))
+        if init_biases is None:
+            np_b = np_zeros((proj_dim,))
+        else:
+            np_b = init_biases
         b = as_shared(np_b)
         set_shared(b_name, b)
 
@@ -1007,31 +1018,31 @@ def pool2d(list_of_inputs, pool_size=(2, 2), pool_func="max", name=None):
                        dtype=_type)
 
 
-'''
-def embedding(list_of_index_inputs, max_index, proj_dim, graph, name,
-              random_state=None, strict=True, init_func=np_uniform):
+def embed(list_of_index_inputs, max_index, proj_dim, name=None,
+          random_state=None, init_func=np_unit_uniform):
     check_type = any([index_input.dtype != "int32"
                       for index_input in list_of_index_inputs])
-    check_dim = any([index_input.ndim != 1
-                     for index_input in list_of_index_inputs])
-    if check_type or check_dim:
-        raise ValueError("index_input must be an ivector!")
-    embedding_W_name = name + "_embedding_W"
-    list_of_names = [embedding_W_name]
-    if not names_in_graph(list_of_names, graph):
-        assert random_state is not None
-        np_embedding_W = init_func((max_index, proj_dim), random_state)
-        add_arrays_to_graph([np_embedding_W], list_of_names, graph,
-                            strict=strict)
-    else:
+    lii = list_of_index_inputs
+    if check_type:
+        lii = [tensor.cast(li, "int32") for li in lii]
+    if name is None:
+        name = get_name()
+    embed_W_name = name + "_embed_W"
+    try:
+        embed_W = get_shared(embed_W_name)
         if strict:
             raise AttributeError(
-                "Name %s already found in graph with strict mode!" % name)
-    embedding_W, = fetch_from_graph(list_of_names, graph)
-    embeddings = [embedding_W[index_input]
-                  for index_input in list_of_index_inputs]
-    # could sum instead?
-    output = concatenate(embeddings, graph, name, axis=embedding_W.ndim - 1)
+                "Name %s already found in parameters, strict mode!" % name)
+    except NameError:
+        np_embed_W = init_func((max_index, proj_dim), random_state)
+        embed_W = as_shared(np_embed_W)
+        set_shared(embed_W_name, embed_W)
+
+    embeddings = [embed_W[index_input]
+                  for index_input in lii]
+    output = concatenate(embeddings, axis=embed_W.ndim - 1)
     n_lists = len(list_of_index_inputs)
-    return output.reshape((-1, n_lists, proj_dim))
-'''
+    if n_lists != 1:
+        raise ValueError("Unsupported number of list_of_index_inputs, currently only supports 1 element")
+    o = output.reshape((-1, index_input.shape[1], proj_dim * n_lists))
+    return o

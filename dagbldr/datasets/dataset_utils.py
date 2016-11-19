@@ -1,6 +1,11 @@
 import tables
 import numbers
 import numpy as np
+import itertools
+
+from ..core import get_logger
+
+logger = get_logger()
 
 
 class base_iterator(object):
@@ -241,3 +246,81 @@ def add_memory_swapper(earray, mem_size):
     # This line is critical...
     _cEArray.__getitem__ = getter
     return earray
+
+
+cap = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+lower = "abcdefghijklmnopqrstuvwxyz"
+alpha = "0123456789"
+punc = " \\`,.?!=-+!@#$%^&*()[]{}:;'|/"
+punc += '"'
+all_chars = cap + lower + alpha + punc
+
+class character_sequence_iterator(object):
+    def __init__(self, sentence_iterator, minibatch_size,
+                 truncation_length,
+                 iterator_length=None,
+                 start_index=0,
+                 stop_index=np.inf,
+                 valid_items=None,
+                 stop_items=None,
+                 extra_preproc_options=None):
+        self.sentence_iterator = sentence_iterator
+        self.minibatch_size = minibatch_size
+        self.truncation_length = truncation_length
+        self.start_index = start_index
+        self.stop_index = stop_index
+        if start_index != 0 or stop_index != np.inf:
+            raise AttributeError("start_index and stop_index not yet supported")
+        self.slice_start_ = start_index
+        self.extra_preproc_options = extra_preproc_options
+        if self.extra_preproc_options is not None:
+            raise AttributeError("Extra preproc options not yet supported")
+        self.n_classes = len(all_chars)
+        rlu = {k: v for k, v in enumerate(all_chars)}
+        lu = {v: k for k, v in rlu.items()}
+        self.char_to_class = lu
+        self.class_to_char = rlu
+        if iterator_length is None:
+            logger.info("No iterator_length provided for truncation mode.")
+            logger.info("Calculating...")
+            l = 0
+            for s in sentence_iterator:
+                l += len(s)
+            self.iterator_length = l
+
+        self.iterator_length -= self.iterator_length % (minibatch_size * truncation_length)
+        self.sequence_length = self.iterator_length // minibatch_size
+
+        def rg():
+            minibatch_gens = []
+            sl = self.sequence_length
+            for i in range(minibatch_size):
+                self.flat_gen = (i for s in sentence_iterator for i in s)
+                minibatch_gens.append(itertools.islice(self.flat_gen, i * sl, (i + 1) * sl))
+            self.flat_gen = (i for s in sentence_iterator for i in s)
+            self.minibatch_gens = minibatch_gens
+        rg()
+        self.reset_gens = rg
+
+    def reset(self):
+        #self.slice_start_ = self.start_index
+        self.reset_gens()
+
+    def __iter__(self):
+        return self
+
+    def next(self):
+        return self.__next__()
+
+    def _t(self, el):
+        return self.char_to_class[el]
+
+    def __next__(self):
+        try:
+            arr  = [[self._t(self.minibatch_gens[i].next())
+                    for n in range(self.truncation_length)]
+                    for i in range(self.minibatch_size)]
+            return np.asarray(arr).T.astype("float32")
+        except StopIteration:
+            self.reset()
+            raise StopIteration("Stop index reached")

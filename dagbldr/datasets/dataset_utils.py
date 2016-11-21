@@ -2,8 +2,10 @@ import tables
 import numbers
 import numpy as np
 import itertools
+import re
 
 from ..core import get_logger
+from collections import Counter
 
 logger = get_logger()
 
@@ -321,6 +323,133 @@ class character_sequence_iterator(object):
                     for n in range(self.truncation_length)]
                     for i in range(self.minibatch_size)]
             return np.asarray(arr).T.astype("float32")
+        except StopIteration:
+            self.reset()
+            raise StopIteration("Stop index reached")
+
+
+"""
+# based on http://alexbowe.com/au-naturale/
+# Word Tokenization Regex adapted from NLTK book
+# (?x) sets flag to allow comments in regexps
+sentence_re = r'''(?x)
+  # abbreviations, e.g. U.S.A. (with optional last period)
+  ([A-Z])(\.[A-Z])+\.?
+  # words with optional internal hyphens
+  | \w+(-\w+)*
+  # currency and percentages, e.g. $12.40, 82%
+  | \$?\d+(\.\d+)?%?
+  # ellipsis
+  | \.\.\.
+  # these are separate tokens
+  | [][.,;"'?():-_`]
+'''
+
+compiled_sentence_re = re.compile(sentence_re)
+"""
+
+class word_sequence_iterator(object):
+    def __init__(self, sentence_iterator, minibatch_size,
+                 truncation_length,
+                 iterator_length=None,
+                 start_index=0,
+                 stop_index=np.inf,
+                 vocabulary=None,
+                 max_vocabulary_size=5000,
+                 tokenizer="default"):
+        """
+        'default' is lowercase, split on space
+        """
+        self.sentence_iterator = sentence_iterator
+        self.minibatch_size = minibatch_size
+        self.truncation_length = truncation_length
+        self.start_index = start_index
+        self.stop_index = stop_index
+        if start_index != 0 or stop_index != np.inf:
+            raise AttributeError("start_index and stop_index not yet supported")
+        self.slice_start_ = start_index
+        self.tokenizer = tokenizer
+        if tokenizer != "default":
+            raise ValueError("Unsupported tokenizer option")
+        self.vocabulary = None
+
+        self._unk = "<UNK>"
+        self._sos = "<START>"
+        self._eos = "<EOS>"
+        def process(s):
+            s = s.lower()
+            toks = s.split(" ")
+            # why is this infinity times slower
+            #toks = nltk.regexp_tokenize(s, compiled_sentence_re)
+            if len(toks) > 0 and len(toks[-1]) > 0:
+                toks = toks[:-1] if toks[-1][-1] in [".", "!", "?"] else toks
+            toks += [self._eos]
+            return toks
+        self._process = process
+
+        calculated_iterator_length = 0
+        words = Counter()
+        if vocabulary is None:
+            logger.info("No vocabulary provided for truncation mode.")
+            logger.info("Calculating...")
+            sg = (s for s in sentence_iterator)
+            for n, s in enumerate(sg):
+                toks = self._process(s)
+                words.update(toks)
+                calculated_iterator_length += len(toks)
+                if n % 1000 == 0:
+                    logger.info("Processed %s sentences so far" % n)
+        elif vocabulary is not None:
+            raise ValueError("TODO: Support fixed vocabulary!")
+
+        self.iterator_length = calculated_iterator_length
+        self.words_counter = words
+
+        self.max_vocabulary_size = max_vocabulary_size
+
+        v = sorted([w[0] for w in words.most_common(max_vocabulary_size - 1)]) + [self._unk]
+        rlu = {k: v for k, v in enumerate(v)}
+        lu = {v: k for k, v in rlu.items()}
+        self.word_to_class = lu
+        self.class_to_words = rlu
+        self.vocabulary = v
+        self.n_classes = len(v)
+
+        self.iterator_length -= self.iterator_length % (minibatch_size * truncation_length)
+        self.sequence_length = self.iterator_length // minibatch_size
+
+        def rg():
+            minibatch_gens = []
+            sl = self.sequence_length
+            def r(): return (i for s in sentence_iterator for i in self._process(s))
+            for i in range(minibatch_size):
+                self.flat_gen = r()
+                minibatch_gens.append(itertools.islice(self.flat_gen, i * sl, (i + 1) * sl))
+            self.flat_gen = r()
+            self.minibatch_gens = minibatch_gens
+        rg()
+        self.reset_gens = rg
+
+    def reset(self):
+        #self.slice_start_ = self.start_index
+        self.reset_gens()
+
+    def __iter__(self):
+        return self
+
+    def next(self):
+        return self.__next__()
+
+    def _t(self, el):
+        return self.word_to_class.get(el, self.word_to_class[self._unk])
+
+    def __next__(self):
+        try:
+            out = []
+            for i in range(self.minibatch_size):
+                a = [self._t(self.minibatch_gens[i].next()) for n in range(self.truncation_length)]
+                out.append(a)
+            return np.asarray(out).T.astype("float32")
         except StopIteration:
             self.reset()
             raise StopIteration("Stop index reached")

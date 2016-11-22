@@ -1,4 +1,3 @@
-import tables
 import numbers
 import numpy as np
 import itertools
@@ -152,104 +151,6 @@ class list_iterator(base_iterator):
             raise StopIteration("End of iteration")
 
 
-def add_memory_swapper(earray, mem_size):
-    class _cEArray(tables.EArray):
-        pass
-
-    # Filthy hack to override getter which is a cextension...
-    earray.__class__ = _cEArray
-
-    earray._in_mem_size = int(float(mem_size))
-    assert earray._in_mem_size >= 1E6  # don't use for smaller than 1MB
-    earray._in_mem_slice = np.empty([1] * len(earray.shape)).astype("float32")
-    earray._in_mem_limits = [np.inf, -np.inf]
-
-    old_getter = earray.__getitem__
-
-    def _check_in_mem(earray, start, stop):
-        lower = earray._in_mem_limits[0]
-        upper = earray._in_mem_limits[1]
-        if start < lower or stop > upper:
-            return False
-        else:
-            return True
-
-    def _load_in_mem(earray, start, stop):
-        # start and stop are slice indices desired - we calculate different
-        # sizes to put in memory
-        n_bytes_per_entry = earray._in_mem_slice.dtype.itemsize
-        n_entries = earray._in_mem_size / float(n_bytes_per_entry)
-        n_samples = earray.shape[0]
-        n_other = earray.shape[1:]
-        n_samples_that_fit = int(n_entries / np.prod(n_other))
-        assert n_samples_that_fit > 0
-        # handle - index case later
-        assert start >= 0
-        assert stop >= 0
-        assert stop >= start
-        slice_size = stop - start
-        if slice_size > n_samples_that_fit:
-            err_str = "Slice from [%i:%i] (size %i) too large! " % (
-                start, stop, slice_size)
-            err_str += "Max slice size %i" % n_samples_that_fit
-            raise ValueError(err_str)
-        slice_limit = [start, stop]
-        earray._in_mem_limits = slice_limit
-        if earray._in_mem_slice.shape[0] == 1:
-            # allocate memory
-            print("Allocating %f gigabytes of memory for EArray swap buffer" %
-                  (earray._in_mem_size / float(1E9)))
-            earray._in_mem_slice = np.empty((n_samples_that_fit,) + n_other,
-                                            dtype=earray.dtype)
-        # handle edge case when last chunk is smaller than what slice will
-        # return
-        limit = min([slice_limit[1] - slice_limit[0],
-                     n_samples - slice_limit[0]])
-        earray._in_mem_slice[:limit] = old_getter(
-            slice(slice_limit[0], slice_limit[1], 1))
-
-    def getter(self, key):
-        if isinstance(key, numbers.Integral) or isinstance(key, np.integer):
-            start, stop, step = self._processRange(key, key, 1)
-            if key < 0:
-                key = start
-            if _check_in_mem(self, key, key):
-                lower = self._in_mem_limits[0]
-            else:
-                # slice into memory...
-                _load_in_mem(self, key, key)
-                lower = self._in_mem_limits[0]
-            return self._in_mem_slice[key - lower]
-        elif isinstance(key, slice):
-            start, stop, step = self._processRange(
-                key.start, key.stop, key.step)
-            if _check_in_mem(self, start, stop):
-                lower = self._in_mem_limits[0]
-            else:
-                # slice into memory...
-                _load_in_mem(self, start, stop)
-                lower = self._in_mem_limits[0]
-            return self._in_mem_slice[start - lower:stop - lower:step]
-        elif len(key) == 2:
-            # Slice with extra axes like [1:100, :]
-            key = key[0]
-            start, stop, step = self._processRange(
-                key.start, key.stop, key.step)
-            if _check_in_mem(self, start, stop):
-                lower = self._in_mem_limits[0]
-            else:
-                # slice into memory...
-                _load_in_mem(self, start, stop)
-                lower = self._in_mem_limits[0]
-            return self._in_mem_slice[start - lower:stop - lower:step]
-        else:
-            raise ValueError("Must index with a slice object or single value"
-                             "along 0 axis!")
-    # This line is critical...
-    _cEArray.__getitem__ = getter
-    return earray
-
-
 cap = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 lower = "abcdefghijklmnopqrstuvwxyz"
 alpha = "0123456789"
@@ -282,6 +183,10 @@ class character_sequence_iterator(object):
         lu = {v: k for k, v in rlu.items()}
         self.char_to_class = lu
         self.class_to_char = rlu
+        def process(s):
+            return [si for si in s]
+
+        self._process = process
         if iterator_length is None:
             logger.info("No iterator_length provided for truncation mode.")
             logger.info("Calculating...")
@@ -296,10 +201,11 @@ class character_sequence_iterator(object):
         def rg():
             minibatch_gens = []
             sl = self.sequence_length
+            def r(): return (i for s in sentence_iterator for i in self._process(s))
             for i in range(minibatch_size):
-                self.flat_gen = (i for s in sentence_iterator for i in s)
+                self.flat_gen = r()
                 minibatch_gens.append(itertools.islice(self.flat_gen, i * sl, (i + 1) * sl))
-            self.flat_gen = (i for s in sentence_iterator for i in s)
+            self.flat_gen = r()
             self.minibatch_gens = minibatch_gens
         rg()
         self.reset_gens = rg
@@ -319,13 +225,31 @@ class character_sequence_iterator(object):
 
     def __next__(self):
         try:
-            arr  = [[self._t(self.minibatch_gens[i].next())
+            arr  = [[self._t(next(self.minibatch_gens[i]))
                     for n in range(self.truncation_length)]
                     for i in range(self.minibatch_size)]
             return np.asarray(arr).T.astype("float32")
         except StopIteration:
             self.reset()
             raise StopIteration("Stop index reached")
+
+    def transform(self, list_of_strings):
+        """
+        list_of strings should be, well, a list of strings
+        """
+        arr = [self._t(si) for s in list_of_strings for si in self._process(s)]
+        arr = np.asarray(arr)
+        if len(arr.shape) == 1:
+            arr = arr[None, :]
+        return arr.T.astype("float32")
+
+    def inverse_transform(self, index_array):
+        """
+        index_array should be 2D, shape (n_steps, minibatch_index)
+        """
+        return [[self.class_to_char[int(ai)]
+                 for ai in index_array[:, i]]
+                 for i in range(index_array.shape[1])]
 
 
 """
@@ -347,6 +271,7 @@ sentence_re = r'''(?x)
 
 compiled_sentence_re = re.compile(sentence_re)
 """
+compiled_process_re = re.compile('[^A-Za-z ]+')
 
 class word_sequence_iterator(object):
     def __init__(self, sentence_iterator, minibatch_size,
@@ -358,7 +283,7 @@ class word_sequence_iterator(object):
                  max_vocabulary_size=5000,
                  tokenizer="default"):
         """
-        'default' is lowercase, split on space
+        'default' is lowercase
         """
         self.sentence_iterator = sentence_iterator
         self.minibatch_size = minibatch_size
@@ -378,11 +303,9 @@ class word_sequence_iterator(object):
         self._eos = "<EOS>"
         def process(s):
             s = s.lower()
-            toks = s.split(" ")
+            toks = re.sub(compiled_process_re, "", s).split(" ")
             # why is this infinity times slower
             #toks = nltk.regexp_tokenize(s, compiled_sentence_re)
-            if len(toks) > 0 and len(toks[-1]) > 0:
-                toks = toks[:-1] if toks[-1][-1] in [".", "!", "?"] else toks
             toks += [self._eos]
             return toks
         self._process = process
@@ -411,7 +334,7 @@ class word_sequence_iterator(object):
         rlu = {k: v for k, v in enumerate(v)}
         lu = {v: k for k, v in rlu.items()}
         self.word_to_class = lu
-        self.class_to_words = rlu
+        self.class_to_word = rlu
         self.vocabulary = v
         self.n_classes = len(v)
 
@@ -447,9 +370,27 @@ class word_sequence_iterator(object):
         try:
             out = []
             for i in range(self.minibatch_size):
-                a = [self._t(self.minibatch_gens[i].next()) for n in range(self.truncation_length)]
+                a = [self._t(next(self.minibatch_gens[i])) for n in range(self.truncation_length)]
                 out.append(a)
             return np.asarray(out).T.astype("float32")
         except StopIteration:
             self.reset()
             raise StopIteration("Stop index reached")
+
+    def transform(self, list_of_strings):
+        """
+        list_of strings should be, well, a list of strings
+        """
+        arr = [self._t(si) for s in list_of_strings for si in self._process(s)]
+        arr = np.asarray(arr)
+        if len(arr.shape) == 1:
+            arr = arr[None, :]
+        return arr.T.astype("float32")
+
+    def inverse_transform(self, index_array):
+        """
+        index_array should be 2D, shape (n_steps, minibatch_index)
+        """
+        return [[self.class_to_word[int(ai)]
+                 for ai in index_array[:, i]]
+                 for i in range(index_array.shape[1])]

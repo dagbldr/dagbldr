@@ -101,7 +101,7 @@ checkpoint_dict = create_checkpoint_dict(locals())
 
 TL = TrainingLoop(train_loop, train_itr,
                   valid_loop, valid_itr,
-                  n_epochs=1000,
+                  n_epochs=100,
                   checkpoint_every_n_epochs=1,
                   checkpoint_dict=checkpoint_dict,
                   skip_minimums=True)

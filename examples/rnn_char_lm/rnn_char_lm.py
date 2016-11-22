@@ -24,6 +24,7 @@ n_timesteps = 50
 minibatch_size = 20
 train_itr = character_sequence_iterator(lovecraft["data"], minibatch_size, n_timesteps)
 valid_itr = character_sequence_iterator(lovecraft["data"], minibatch_size, n_timesteps)
+
 mb = train_itr.next()
 X_mb = mb[:-1]
 y_mb = mb[1:]
